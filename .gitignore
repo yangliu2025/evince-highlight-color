@@ -1,0 +1,35 @@
+# Meson build directories
+_build/
+build/
+builddir/
+subprojects/*/
+
+# Compiled output
+*.o
+*.lo
+*.a
+*.so
+*.so.*
+*.gir
+*.typelib
+
+# Translations
+*.mo
+*.gmo
+*.pot
+
+# Patch / merge leftovers
+*.orig
+*.rej
+*.bak
+
+# Editors and tooling
+*~
+*.swp
+.vscode/
+.idea/
+.cache/
+compile_commands.json
+
+# OS
+.DS_Store
