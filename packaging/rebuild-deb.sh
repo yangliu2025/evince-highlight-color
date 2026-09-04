@@ -24,6 +24,11 @@ WORKDIR="${1:-$PWD/evince-deb-build}"
 for tool in dpkg-buildpackage dch quilt; do
 	command -v "$tool" >/dev/null || { echo "missing: $tool" >&2; exit 1; }
 done
+if [[ -z $(apt-cache showsrc evince 2>/dev/null) ]]; then
+	echo "no deb-src for evince; add a deb-src entry for noble main under" >&2
+	echo "/etc/apt/sources.list.d/ and run apt update" >&2
+	exit 1
+fi
 git -C "$REPO" rev-parse --verify --quiet "$BASE_REF" >/dev/null ||
 	{ echo "no such ref in $REPO: $BASE_REF" >&2; exit 1; }
 
