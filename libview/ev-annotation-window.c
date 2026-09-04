@@ -389,7 +389,7 @@ ev_annotation_window_init (EvAnnotationWindow *window)
 	pixbuf = gtk_icon_theme_load_icon (icon_theme, EV_STOCK_RESIZE_SW, 8,
 					   GTK_ICON_LOOKUP_FORCE_SIZE, NULL);
 	icon = gtk_image_new_from_pixbuf (pixbuf);
-	g_object_unref (pixbuf);
+	g_clear_object (&pixbuf);
 	gtk_container_add (GTK_CONTAINER (window->resize_sw), icon);
 	gtk_widget_show (icon);
 	gtk_box_pack_start (GTK_BOX (hbox), window->resize_sw, FALSE, FALSE, 0);
@@ -407,7 +407,7 @@ ev_annotation_window_init (EvAnnotationWindow *window)
 	pixbuf = gtk_icon_theme_load_icon (icon_theme, EV_STOCK_RESIZE_SE, 8,
 					   GTK_ICON_LOOKUP_FORCE_SIZE, NULL);
 	icon = gtk_image_new_from_pixbuf (pixbuf);
-	g_object_unref (pixbuf);
+	g_clear_object (&pixbuf);
 	gtk_container_add (GTK_CONTAINER (window->resize_se), icon);
 	gtk_widget_show (icon);
 	gtk_box_pack_end (GTK_BOX (hbox), window->resize_se, FALSE, FALSE, 0);
