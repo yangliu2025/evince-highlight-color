@@ -5617,6 +5617,108 @@ view_menu_annot_popup (EvWindow     *ev_window,
 	ev_window_set_action_enabled (ev_window, "save-attachment", show_attachment);
 }
 
+#define EV_COLOR_SWATCH_SIZE 16
+
+static GIcon *
+ev_window_create_color_swatch (const gchar *color_spec)
+{
+	GdkRGBA          rgba;
+	cairo_surface_t *surface;
+	cairo_t         *cr;
+	GdkPixbuf       *pixbuf;
+	GIcon           *icon = NULL;
+	gchar           *png = NULL;
+	gsize            png_size;
+
+	if (!gdk_rgba_parse (&rgba, color_spec))
+		return NULL;
+
+	surface = cairo_image_surface_create (CAIRO_FORMAT_ARGB32,
+					      EV_COLOR_SWATCH_SIZE,
+					      EV_COLOR_SWATCH_SIZE);
+	cr = cairo_create (surface);
+	gdk_cairo_set_source_rgba (cr, &rgba);
+	cairo_rectangle (cr, 0.5, 0.5,
+			 EV_COLOR_SWATCH_SIZE - 1, EV_COLOR_SWATCH_SIZE - 1);
+	cairo_fill_preserve (cr);
+	cairo_set_source_rgba (cr, 0., 0., 0., 0.4);
+	cairo_set_line_width (cr, 1.);
+	cairo_stroke (cr);
+	cairo_destroy (cr);
+
+	pixbuf = gdk_pixbuf_get_from_surface (surface, 0, 0,
+					      EV_COLOR_SWATCH_SIZE,
+					      EV_COLOR_SWATCH_SIZE);
+	cairo_surface_destroy (surface);
+
+	if (gdk_pixbuf_save_to_buffer (pixbuf, &png, &png_size, "png", NULL, NULL)) {
+		GBytes *bytes = g_bytes_new_take (png, png_size);
+
+		icon = g_bytes_icon_new (bytes);
+		g_bytes_unref (bytes);
+	}
+	g_object_unref (pixbuf);
+
+	return icon;
+}
+
+/* GtkBuilder menu XML has no way to express a colour swatch, so paint one for
+ * every colour item once the model has been loaded. */
+static void
+ev_window_add_color_swatches (GMenuModel *model)
+{
+	gint i;
+
+	if (!G_IS_MENU (model))
+		return;
+
+	for (i = 0; i < g_menu_model_get_n_items (model); i++) {
+		GMenuModel *link;
+		GVariant   *target;
+		GMenuItem  *item;
+		GIcon      *icon;
+		gchar      *action = NULL;
+
+		link = g_menu_model_get_item_link (model, i, G_MENU_LINK_SECTION);
+		if (!link)
+			link = g_menu_model_get_item_link (model, i, G_MENU_LINK_SUBMENU);
+		if (link) {
+			ev_window_add_color_swatches (link);
+			g_object_unref (link);
+			continue;
+		}
+
+		if (!g_menu_model_get_item_attribute (model, i, G_MENU_ATTRIBUTE_ACTION,
+						      "s", &action))
+			continue;
+
+		if (!g_str_equal (action, "win.highlight-annotation-color")) {
+			g_free (action);
+			continue;
+		}
+		g_free (action);
+
+		target = g_menu_model_get_item_attribute_value (model, i,
+								G_MENU_ATTRIBUTE_TARGET,
+								G_VARIANT_TYPE_STRING);
+		if (!target)
+			continue;
+
+		icon = ev_window_create_color_swatch (g_variant_get_string (target, NULL));
+		g_variant_unref (target);
+		if (!icon)
+			continue;
+
+		item = g_menu_item_new_from_model (model, i);
+		g_menu_item_set_icon (item, icon);
+		g_object_unref (icon);
+
+		g_menu_remove (G_MENU (model), i);
+		g_menu_insert_item (G_MENU (model), i, item);
+		g_object_unref (item);
+	}
+}
+
 static void
 view_popup_hide_cb (GtkWidget *popup,
 		    EvWindow *ev_window)
@@ -7907,6 +8009,7 @@ ev_window_init (EvWindow *ev_window)
 	/* Popups */
 	builder = gtk_builder_new_from_resource ("/org/gnome/evince/gtk/menus.ui");
 	priv->view_popup_menu = g_object_ref (G_MENU_MODEL (gtk_builder_get_object (builder, "view-popup-menu")));
+	ev_window_add_color_swatches (priv->view_popup_menu);
 	priv->attachment_popup_menu = g_object_ref (G_MENU_MODEL (gtk_builder_get_object (builder, "attachments-popup")));
 	g_object_unref (builder);
 
