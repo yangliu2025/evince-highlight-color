@@ -148,6 +148,21 @@
             <attribute name="action">win.highlight-annotation-color</attribute>
             <attribute name="target">#C896FF</attribute>
           </item>
+          <item>
+            <attribute name="label" translatable="yes">Red</attribute>
+            <attribute name="action">win.highlight-annotation-color</attribute>
+            <attribute name="target">#FF7878</attribute>
+          </item>
+          <item>
+            <attribute name="label" translatable="yes">Cyan</attribute>
+            <attribute name="action">win.highlight-annotation-color</attribute>
+            <attribute name="target">#78F0E6</attribute>
+          </item>
+          <item>
+            <attribute name="label" translatable="yes">Gray</attribute>
+            <attribute name="action">win.highlight-annotation-color</attribute>
+            <attribute name="target">#C0C0C0</attribute>
+          </item>
         </section>
       </submenu>
       <item>
