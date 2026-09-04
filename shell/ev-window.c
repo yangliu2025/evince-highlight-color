@@ -527,6 +527,8 @@ ev_window_update_actions_sensitivity (EvWindow *ev_window)
 				      !recent_view_mode);
 	ev_window_set_action_enabled (ev_window, "highlight-annotation", can_annotate &&
 				      !recent_view_mode);
+	ev_window_set_action_enabled (ev_window, "highlight-annotation-color", can_annotate &&
+				      !recent_view_mode);
 	ev_window_set_action_enabled (ev_window, "toggle-edit-annots", can_annotate &&
 				      !recent_view_mode);
 	ev_window_set_action_enabled (ev_window, "rotate-left", has_pages &&
@@ -5627,6 +5629,7 @@ view_popup_hide_cb (GtkWidget *popup,
 		ev_document_annotations_can_add_annotation (EV_DOCUMENT_ANNOTATIONS (document));
 
 	ev_window_set_action_enabled (ev_window, "highlight-annotation", can_annotate);
+	ev_window_set_action_enabled (ev_window, "highlight-annotation-color", can_annotate);
 }
 
 static gboolean
@@ -5667,6 +5670,7 @@ view_menu_popup_cb (EvView   *view,
 		!has_annot && ev_view_get_has_selection (view);
 
 	ev_window_set_action_enabled (ev_window, "highlight-annotation", can_annotate);
+	ev_window_set_action_enabled (ev_window, "highlight-annotation-color", can_annotate);
 
 	if (!priv->view_popup) {
 		priv->view_popup = gtk_menu_new_from_model (priv->view_popup_menu);
@@ -6092,6 +6096,24 @@ ev_window_cmd_add_highlight_annotation (GSimpleAction *action,
 }
 
 static void
+ev_window_cmd_add_highlight_annotation_with_color (GSimpleAction *action,
+                                                   GVariant      *parameter,
+                                                   gpointer       user_data)
+{
+	EvWindow *ev_window = user_data;
+	EvWindowPrivate *priv = GET_PRIVATE (ev_window);
+	GdkRGBA color;
+
+	if (!gdk_rgba_parse (&color, g_variant_get_string (parameter, NULL))) {
+		g_warning ("Invalid highlight color specification");
+		return;
+	}
+
+	ev_view_set_annotation_color (EV_VIEW (priv->view), &color);
+	ev_window_begin_add_annot (ev_window, EV_ANNOTATION_TYPE_TEXT_MARKUP);
+}
+
+static void
 ev_window_cmd_add_annotation (GSimpleAction *action,
 			      GVariant      *state,
 			      gpointer       user_data)
@@ -6364,6 +6386,7 @@ static const GActionEntry actions[] = {
 	{ "caret-navigation", NULL, NULL, "false", ev_window_cmd_view_toggle_caret_navigation },
 	{ "add-annotation", NULL, NULL, "false", ev_window_cmd_add_annotation },
 	{ "highlight-annotation", ev_window_cmd_add_highlight_annotation },
+	{ "highlight-annotation-color", ev_window_cmd_add_highlight_annotation_with_color, "s" },
 	{ "toggle-edit-annots", NULL, NULL, "false", ev_window_cmd_toggle_edit_annots },
 	{ "about", ev_window_cmd_about },
 	{ "help", ev_window_cmd_help },

@@ -3755,6 +3755,7 @@ ev_view_create_annotation_real (EvView *view,
 		doc_rect.x2 = end.x;
 		doc_rect.y2 = end.y;
 		annot = ev_annotation_text_markup_highlight_new (page);
+		color = view->adding_annot_info.color;
 		break;
 	case EV_ANNOTATION_TYPE_ATTACHMENT:
 		/* TODO */
@@ -3913,6 +3914,24 @@ ev_view_begin_add_annotation (EvView          *view,
 	view->adding_annot_info.adding_annot = TRUE;
 	view->adding_annot_info.type = annot_type;
 	ev_view_set_cursor (view, EV_VIEW_CURSOR_ADD);
+}
+
+/**
+ * ev_view_set_annotation_color:
+ * @view: an #EvView
+ * @color: a #GdkRGBA
+ *
+ * Sets the color used for text markup annotations created afterwards,
+ * either from the selection or interactively.
+ */
+void
+ev_view_set_annotation_color (EvView        *view,
+			      const GdkRGBA *color)
+{
+	g_return_if_fail (EV_IS_VIEW (view));
+	g_return_if_fail (color != NULL);
+
+	view->adding_annot_info.color = *color;
 }
 
 void
@@ -8646,6 +8665,7 @@ ev_view_init (EvView *view)
 	view->allow_links_change_zoom = TRUE;
 	view->zoom_center_x = -1;
 	view->zoom_center_y = -1;
+	view->adding_annot_info.color = EV_ANNOTATION_DEFAULT_COLOR;
 
 	g_signal_connect (view, "notify::scale-factor",
 			  G_CALLBACK (on_notify_scale_factor), NULL);

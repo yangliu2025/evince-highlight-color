@@ -120,6 +120,7 @@ typedef struct {
 	gboolean         adding_annot;
 	EvAnnotationType type;
 	EvAnnotation    *annot;
+	GdkRGBA          color;
 } AddingAnnotInfo;
 
 typedef struct {

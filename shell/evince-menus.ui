@@ -111,6 +111,43 @@
         <attribute name="action">win.highlight-annotation</attribute>
         <attribute name='hidden-when'>action-disabled</attribute>
       </item>
+      <submenu>
+        <attribute name="label" translatable="yes">Highlight _With Color</attribute>
+        <attribute name="action">win.highlight-annotation</attribute>
+        <attribute name='hidden-when'>action-disabled</attribute>
+        <section>
+          <item>
+            <attribute name="label" translatable="yes">Yellow</attribute>
+            <attribute name="action">win.highlight-annotation-color</attribute>
+            <attribute name="target">#FFFF00</attribute>
+          </item>
+          <item>
+            <attribute name="label" translatable="yes">Green</attribute>
+            <attribute name="action">win.highlight-annotation-color</attribute>
+            <attribute name="target">#78FF78</attribute>
+          </item>
+          <item>
+            <attribute name="label" translatable="yes">Blue</attribute>
+            <attribute name="action">win.highlight-annotation-color</attribute>
+            <attribute name="target">#78C8FF</attribute>
+          </item>
+          <item>
+            <attribute name="label" translatable="yes">Pink</attribute>
+            <attribute name="action">win.highlight-annotation-color</attribute>
+            <attribute name="target">#FF8CC8</attribute>
+          </item>
+          <item>
+            <attribute name="label" translatable="yes">Orange</attribute>
+            <attribute name="action">win.highlight-annotation-color</attribute>
+            <attribute name="target">#FFB450</attribute>
+          </item>
+          <item>
+            <attribute name="label" translatable="yes">Purple</attribute>
+            <attribute name="action">win.highlight-annotation-color</attribute>
+            <attribute name="target">#C896FF</attribute>
+          </item>
+        </section>
+      </submenu>
       <item>
         <attribute name="label" translatable="yes">Open Containing _Folder</attribute>
         <attribute name="action">win.open-containing-folder</attribute>
