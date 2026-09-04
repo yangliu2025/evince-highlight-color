@@ -115,53 +115,62 @@
         <attribute name="label" translatable="yes">Highlight _Color</attribute>
         <attribute name="action">win.highlight-annotation-color</attribute>
         <!-- A target is required for hidden-when to track a parameterised action. -->
-        <attribute name="target">#FFFF00</attribute>
+        <attribute name="target">#EAEA7C</attribute>
         <attribute name='hidden-when'>action-disabled</attribute>
         <section>
           <item>
             <attribute name="label" translatable="yes">Yellow</attribute>
             <attribute name="action">win.highlight-annotation-color</attribute>
-            <attribute name="target">#FFFF00</attribute>
+            <attribute name="target">#EAEA7C</attribute>
+            <attribute name="x-swatch-color">#F4F425</attribute>
           </item>
           <item>
             <attribute name="label" translatable="yes">Green</attribute>
             <attribute name="action">win.highlight-annotation-color</attribute>
-            <attribute name="target">#78FF78</attribute>
+            <attribute name="target">#C4DEC4</attribute>
+            <attribute name="x-swatch-color">#25F425</attribute>
           </item>
           <item>
             <attribute name="label" translatable="yes">Blue</attribute>
             <attribute name="action">win.highlight-annotation-color</attribute>
-            <attribute name="target">#78C8FF</attribute>
+            <attribute name="target">#C5E2F7</attribute>
+            <attribute name="x-swatch-color">#259DF4</attribute>
           </item>
           <item>
             <attribute name="label" translatable="yes">Pink</attribute>
             <attribute name="action">win.highlight-annotation-color</attribute>
-            <attribute name="target">#FF8CC8</attribute>
+            <attribute name="target">#F7CCE2</attribute>
+            <attribute name="x-swatch-color">#F4258F</attribute>
           </item>
           <item>
             <attribute name="label" translatable="yes">Orange</attribute>
             <attribute name="action">win.highlight-annotation-color</attribute>
-            <attribute name="target">#FFB450</attribute>
+            <attribute name="target">#FFDAA8</attribute>
+            <attribute name="x-swatch-color">#F49C25</attribute>
           </item>
           <item>
             <attribute name="label" translatable="yes">Purple</attribute>
             <attribute name="action">win.highlight-annotation-color</attribute>
-            <attribute name="target">#C896FF</attribute>
+            <attribute name="target">#E2D5F1</attribute>
+            <attribute name="x-swatch-color">#8525F4</attribute>
           </item>
           <item>
             <attribute name="label" translatable="yes">Red</attribute>
             <attribute name="action">win.highlight-annotation-color</attribute>
-            <attribute name="target">#FF7878</attribute>
+            <attribute name="target">#F3C8C8</attribute>
+            <attribute name="x-swatch-color">#F42525</attribute>
           </item>
           <item>
             <attribute name="label" translatable="yes">Cyan</attribute>
             <attribute name="action">win.highlight-annotation-color</attribute>
-            <attribute name="target">#78F0E6</attribute>
+            <attribute name="target">#BBD9D7</attribute>
+            <attribute name="x-swatch-color">#25F4E6</attribute>
           </item>
           <item>
             <attribute name="label" translatable="yes">Gray</attribute>
             <attribute name="action">win.highlight-annotation-color</attribute>
-            <attribute name="target">#C0C0C0</attribute>
+            <attribute name="target">#E1E1E1</attribute>
+            <attribute name="x-swatch-color">#999999</attribute>
           </item>
         </section>
       </submenu>

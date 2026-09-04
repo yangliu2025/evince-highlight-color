@@ -5674,7 +5674,7 @@ ev_window_add_color_swatches (GMenuModel *model)
 
 	for (i = 0; i < g_menu_model_get_n_items (model); i++) {
 		GMenuModel *link;
-		GVariant   *target;
+		GVariant   *swatch;
 		GMenuItem  *item;
 		GIcon      *icon;
 		gchar      *action = NULL;
@@ -5698,14 +5698,20 @@ ev_window_add_color_swatches (GMenuModel *model)
 		}
 		g_free (action);
 
-		target = g_menu_model_get_item_attribute_value (model, i,
-								G_MENU_ATTRIBUTE_TARGET,
+		/* Highlights are pale so they do not swamp the glyphs, which
+		 * makes for muddy swatches; x-swatch-color draws the same hue
+		 * at full strength instead. */
+		swatch = g_menu_model_get_item_attribute_value (model, i, "x-swatch-color",
 								G_VARIANT_TYPE_STRING);
-		if (!target)
+		if (!swatch)
+			swatch = g_menu_model_get_item_attribute_value (model, i,
+									G_MENU_ATTRIBUTE_TARGET,
+									G_VARIANT_TYPE_STRING);
+		if (!swatch)
 			continue;
 
-		icon = ev_window_create_color_swatch (g_variant_get_string (target, NULL));
-		g_variant_unref (target);
+		icon = ev_window_create_color_swatch (g_variant_get_string (swatch, NULL));
+		g_variant_unref (swatch);
 		if (!icon)
 			continue;
 
