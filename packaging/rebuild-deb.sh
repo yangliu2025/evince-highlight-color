@@ -32,13 +32,23 @@ cd "$WORKDIR"
 apt-get source evince
 cd "$(find . -maxdepth 1 -type d -name 'evince-*' | sort -V | tail -1)"
 
+# dch --local always restarts from the archive version, which collides with an
+# already-installed +hlN and makes apt report "already the newest version".
+ARCHIVE_VERSION="$(dpkg-parsechangelog -S Version)"
+INSTALLED="$(dpkg-query -W -f='${Version}' evince 2>/dev/null || true)"
+suffix=1
+if [[ $INSTALLED == "$ARCHIVE_VERSION"+hl* ]]; then
+	suffix=$(( ${INSTALLED##*+hl} + 1 ))
+fi
+LOCAL_VERSION="${ARCHIVE_VERSION}+hl${suffix}"
+
 git -C "$REPO" diff "$BASE_REF" HEAD -- libview shell > "debian/patches/$PATCH_NAME"
 grep -qxF "$PATCH_NAME" debian/patches/series || echo "$PATCH_NAME" >> debian/patches/series
 
 # dpkg-gensymbols only fails on *removed* symbols, but keep the file honest.
 symbols=debian/libevview3-3t64.symbols
 if [[ -f $symbols ]] && ! grep -q "$NEW_SYMBOL" "$symbols"; then
-	sed -i "/^ ev_view_set_enable_spellchecking@Base/i\\ $NEW_SYMBOL@Base $(dpkg-parsechangelog -S Version)+hl1" "$symbols"
+	sed -i "/^ ev_view_set_enable_spellchecking@Base/i\\ $NEW_SYMBOL@Base $LOCAL_VERSION" "$symbols"
 fi
 
 QUILT_PATCHES=debian/patches quilt push -a
@@ -46,7 +56,7 @@ QUILT_PATCHES=debian/patches quilt pop -a
 
 DEBEMAIL="${DEBEMAIL:-$(git -C "$REPO" config user.email)}" \
 DEBFULLNAME="${DEBFULLNAME:-$(git -C "$REPO" config user.name)}" \
-	dch --local '+hl' --distribution "$(lsb_release -cs)" \
+	dch --newversion "$LOCAL_VERSION" --distribution "$(lsb_release -cs)" \
 	    "Local build: highlight colour picker in the view popup menu."
 
 DEB_BUILD_OPTIONS="parallel=$(nproc)" dpkg-buildpackage -b -uc -us
