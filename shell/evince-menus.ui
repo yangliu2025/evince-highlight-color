@@ -112,8 +112,10 @@
         <attribute name='hidden-when'>action-disabled</attribute>
       </item>
       <submenu>
-        <attribute name="label" translatable="yes">Highlight _With Color</attribute>
-        <attribute name="action">win.highlight-annotation</attribute>
+        <attribute name="label" translatable="yes">Highlight _Color</attribute>
+        <attribute name="action">win.highlight-annotation-color</attribute>
+        <!-- A target is required for hidden-when to track a parameterised action. -->
+        <attribute name="target">#FFFF00</attribute>
         <attribute name='hidden-when'>action-disabled</attribute>
         <section>
           <item>

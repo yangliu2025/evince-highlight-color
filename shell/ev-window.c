@@ -5670,7 +5670,9 @@ view_menu_popup_cb (EvView   *view,
 		!has_annot && ev_view_get_has_selection (view);
 
 	ev_window_set_action_enabled (ev_window, "highlight-annotation", can_annotate);
-	ev_window_set_action_enabled (ev_window, "highlight-annotation-color", can_annotate);
+	ev_window_set_action_enabled (ev_window, "highlight-annotation-color",
+				      can_annotate ||
+				      (priv->annot != NULL && EV_IS_ANNOTATION_MARKUP (priv->annot)));
 
 	if (!priv->view_popup) {
 		priv->view_popup = gtk_menu_new_from_model (priv->view_popup_menu);
@@ -6096,9 +6098,9 @@ ev_window_cmd_add_highlight_annotation (GSimpleAction *action,
 }
 
 static void
-ev_window_cmd_add_highlight_annotation_with_color (GSimpleAction *action,
-                                                   GVariant      *parameter,
-                                                   gpointer       user_data)
+ev_window_cmd_highlight_annotation_color (GSimpleAction *action,
+                                          GVariant      *parameter,
+                                          gpointer       user_data)
 {
 	EvWindow *ev_window = user_data;
 	EvWindowPrivate *priv = GET_PRIVATE (ev_window);
@@ -6110,6 +6112,25 @@ ev_window_cmd_add_highlight_annotation_with_color (GSimpleAction *action,
 	}
 
 	ev_view_set_annotation_color (EV_VIEW (priv->view), &color);
+
+	/* The popup was opened on top of an existing annotation: recolour it
+	 * instead of creating a new one. */
+	if (priv->annot && EV_IS_ANNOTATION_MARKUP (priv->annot)) {
+		if (!ev_annotation_set_rgba (priv->annot, &color))
+			return;
+
+		ev_document_doc_mutex_lock ();
+		ev_document_annotations_save_annotation (EV_DOCUMENT_ANNOTATIONS (priv->document),
+							 priv->annot,
+							 EV_ANNOTATIONS_SAVE_COLOR);
+		ev_document_doc_mutex_unlock ();
+
+		ev_view_reload (EV_VIEW (priv->view));
+		ev_sidebar_annotations_annot_changed (EV_SIDEBAR_ANNOTATIONS (priv->sidebar_annots),
+						      priv->annot);
+		return;
+	}
+
 	ev_window_begin_add_annot (ev_window, EV_ANNOTATION_TYPE_TEXT_MARKUP);
 }
 
@@ -6386,7 +6407,7 @@ static const GActionEntry actions[] = {
 	{ "caret-navigation", NULL, NULL, "false", ev_window_cmd_view_toggle_caret_navigation },
 	{ "add-annotation", NULL, NULL, "false", ev_window_cmd_add_annotation },
 	{ "highlight-annotation", ev_window_cmd_add_highlight_annotation },
-	{ "highlight-annotation-color", ev_window_cmd_add_highlight_annotation_with_color, "s" },
+	{ "highlight-annotation-color", ev_window_cmd_highlight_annotation_color, "s" },
 	{ "toggle-edit-annots", NULL, NULL, "false", ev_window_cmd_toggle_edit_annots },
 	{ "about", ev_window_cmd_about },
 	{ "help", ev_window_cmd_help },
