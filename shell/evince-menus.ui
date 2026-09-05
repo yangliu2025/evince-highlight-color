@@ -115,13 +115,13 @@
         <attribute name="label" translatable="yes">Highlight _Color</attribute>
         <attribute name="action">win.highlight-annotation-color</attribute>
         <!-- A target is required for hidden-when to track a parameterised action. -->
-        <attribute name="target">#EAEA7C</attribute>
+        <attribute name="target">#F5F5AB</attribute>
         <attribute name='hidden-when'>action-disabled</attribute>
         <section>
           <item>
             <attribute name="label" translatable="yes">Yellow</attribute>
             <attribute name="action">win.highlight-annotation-color</attribute>
-            <attribute name="target">#EAEA7C</attribute>
+            <attribute name="target">#F5F5AB</attribute>
             <attribute name="x-swatch-color">#F4F425</attribute>
           </item>
           <item>
