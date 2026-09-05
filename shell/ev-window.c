@@ -5663,9 +5663,12 @@ ev_window_create_color_swatch (const gchar *color_spec)
 }
 
 /* GtkBuilder menu XML has no way to express a colour swatch, so paint one for
- * every colour item once the model has been loaded. */
+ * every colour item once the model has been loaded. Also reports the first
+ * colour of the palette, which seeds the default used by Ctrl+H. */
 static void
-ev_window_add_color_swatches (GMenuModel *model)
+ev_window_add_color_swatches (GMenuModel *model,
+			      GdkRGBA    *first_color,
+			      gboolean   *have_first)
 {
 	gint i;
 
@@ -5675,6 +5678,7 @@ ev_window_add_color_swatches (GMenuModel *model)
 	for (i = 0; i < g_menu_model_get_n_items (model); i++) {
 		GMenuModel *link;
 		GVariant   *swatch;
+		GVariant   *target;
 		GMenuItem  *item;
 		GIcon      *icon;
 		gchar      *action = NULL;
@@ -5683,7 +5687,7 @@ ev_window_add_color_swatches (GMenuModel *model)
 		if (!link)
 			link = g_menu_model_get_item_link (model, i, G_MENU_LINK_SUBMENU);
 		if (link) {
-			ev_window_add_color_swatches (link);
+			ev_window_add_color_swatches (link, first_color, have_first);
 			g_object_unref (link);
 			continue;
 		}
@@ -5698,20 +5702,25 @@ ev_window_add_color_swatches (GMenuModel *model)
 		}
 		g_free (action);
 
+		target = g_menu_model_get_item_attribute_value (model, i,
+								G_MENU_ATTRIBUTE_TARGET,
+								G_VARIANT_TYPE_STRING);
+		if (target && !*have_first)
+			*have_first = gdk_rgba_parse (first_color,
+						      g_variant_get_string (target, NULL));
+
 		/* Highlights are pale so they do not swamp the glyphs, which
 		 * makes for muddy swatches; x-swatch-color draws the same hue
 		 * at full strength instead. */
 		swatch = g_menu_model_get_item_attribute_value (model, i, "x-swatch-color",
 								G_VARIANT_TYPE_STRING);
-		if (!swatch)
-			swatch = g_menu_model_get_item_attribute_value (model, i,
-									G_MENU_ATTRIBUTE_TARGET,
-									G_VARIANT_TYPE_STRING);
-		if (!swatch)
+		if (!swatch && !target)
 			continue;
 
-		icon = ev_window_create_color_swatch (g_variant_get_string (swatch, NULL));
-		g_variant_unref (swatch);
+		icon = ev_window_create_color_swatch (g_variant_get_string (swatch ? swatch : target,
+										    NULL));
+		g_clear_pointer (&swatch, g_variant_unref);
+		g_clear_pointer (&target, g_variant_unref);
 		if (!icon)
 			continue;
 
@@ -8015,7 +8024,14 @@ ev_window_init (EvWindow *ev_window)
 	/* Popups */
 	builder = gtk_builder_new_from_resource ("/org/gnome/evince/gtk/menus.ui");
 	priv->view_popup_menu = g_object_ref (G_MENU_MODEL (gtk_builder_get_object (builder, "view-popup-menu")));
-	ev_window_add_color_swatches (priv->view_popup_menu);
+	{
+		GdkRGBA  first_color;
+		gboolean have_first = FALSE;
+
+		ev_window_add_color_swatches (priv->view_popup_menu, &first_color, &have_first);
+		if (have_first)
+			ev_view_set_annotation_color (EV_VIEW (priv->view), &first_color);
+	}
 	priv->attachment_popup_menu = g_object_ref (G_MENU_MODEL (gtk_builder_get_object (builder, "attachments-popup")));
 	g_object_unref (builder);
 
