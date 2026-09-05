@@ -122,7 +122,7 @@
             <attribute name="label" translatable="yes">Yellow</attribute>
             <attribute name="action">win.highlight-annotation-color</attribute>
             <attribute name="target">#F9F967</attribute>
-            <attribute name="x-swatch-color">#F4F425</attribute>
+            <attribute name="x-swatch-color">#FFFF00</attribute>
           </item>
           <item>
             <attribute name="label" translatable="yes">Green</attribute>
