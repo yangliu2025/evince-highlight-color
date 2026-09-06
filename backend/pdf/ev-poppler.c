@@ -3225,19 +3225,31 @@ pdf_document_annotations_add_annotation (EvDocumentAnnotations *document_annotat
 			break;
 		case EV_ANNOTATION_TYPE_TEXT_MARKUP: {
 			GArray *quads;
-			PopplerRectangle bbox;
+			gpointer previous;
 
-			quads = get_quads_for_area (poppler_page, &rect, &bbox);
+			previous = g_object_get_data (G_OBJECT (annot), "poppler-annot");
 
-			if (bbox.x1 != 0 && bbox.y1 != 0 && bbox.x2 != 0 && bbox.y2 != 0) {
-				poppler_rect.x1 = rect.x1 = bbox.x1;
-				poppler_rect.x2 = rect.x2 = bbox.x2;
-				rect.y1 = height - bbox.y2;
-				rect.y2 = height - bbox.y1;
-				poppler_rect.y1 = bbox.y1;
-				poppler_rect.y2 = bbox.y2;
+			/* The stored area is the bounding box of the marked glyphs, and a
+			 * corner-to-corner text selection over it covers more text than the
+			 * original one did. So when the annotation is being put back into
+			 * the document (undo of a removal), reuse the quads it already has. */
+			if (POPPLER_IS_ANNOT_TEXT_MARKUP (previous)) {
+				quads = poppler_annot_text_markup_get_quadrilaterals (POPPLER_ANNOT_TEXT_MARKUP (previous));
+			} else {
+				PopplerRectangle bbox;
 
-				ev_annotation_set_area (annot, &rect);
+				quads = get_quads_for_area (poppler_page, &rect, &bbox);
+
+				if (bbox.x1 != 0 && bbox.y1 != 0 && bbox.x2 != 0 && bbox.y2 != 0) {
+					poppler_rect.x1 = rect.x1 = bbox.x1;
+					poppler_rect.x2 = rect.x2 = bbox.x2;
+					rect.y1 = height - bbox.y2;
+					rect.y2 = height - bbox.y1;
+					poppler_rect.y1 = bbox.y1;
+					poppler_rect.y2 = bbox.y2;
+
+					ev_annotation_set_area (annot, &rect);
+				}
 			}
 
 			switch (ev_annotation_text_markup_get_markup_type (EV_ANNOTATION_TEXT_MARKUP (annot))) {
