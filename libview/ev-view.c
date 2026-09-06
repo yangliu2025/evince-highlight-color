@@ -4013,6 +4013,43 @@ ev_view_remove_annotation (EvView       *view,
 	g_object_unref (annot);
 }
 
+/**
+ * ev_view_add_annotation:
+ * @view: an #EvView
+ * @annot: an #EvAnnotation that is currently not part of the document
+ *
+ * Puts @annot back into the document it was removed from, keeping its page,
+ * area and properties. This is the counterpart of ev_view_remove_annotation()
+ * and is meant to undo a removal.
+ */
+void
+ev_view_add_annotation (EvView       *view,
+			EvAnnotation *annot)
+{
+	guint page;
+
+	g_return_if_fail (EV_IS_VIEW (view));
+	g_return_if_fail (EV_IS_ANNOTATION (annot));
+
+	if (!EV_IS_DOCUMENT_ANNOTATIONS (view->document))
+		return;
+
+	page = ev_annotation_get_page_index (annot);
+
+	/* The document mapping list takes over a reference of its own. */
+	g_object_ref (annot);
+
+	ev_document_doc_mutex_lock ();
+	ev_document_annotations_add_annotation (EV_DOCUMENT_ANNOTATIONS (view->document),
+						annot, NULL);
+	ev_document_doc_mutex_unlock ();
+
+	ev_page_cache_mark_dirty (view->page_cache, page, EV_PAGE_DATA_INCLUDE_ANNOTS);
+	ev_view_reload_page (view, page, NULL);
+
+	g_signal_emit (view, signals[SIGNAL_ANNOT_ADDED], 0, annot);
+}
+
 static gboolean
 ev_view_synctex_backward_search (EvView *view,
 				 gdouble x,

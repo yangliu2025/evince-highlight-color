@@ -28,6 +28,13 @@
             <child>
               <object class="GtkShortcutsShortcut">
                 <property name="visible">True</property>
+                <property name="title" translatable="yes" context="shortcut window">Save the current document</property>
+                <property name="action-name">win.save</property>
+              </object>
+            </child>
+            <child>
+              <object class="GtkShortcutsShortcut">
+                <property name="visible">True</property>
                 <property name="title" translatable="yes" context="shortcut window">Save a copy of the current document</property>
                 <property name="action-name">win.save-as</property>
               </object>
@@ -340,6 +347,27 @@
                 <property name="visible">True</property>
                 <property name="title" translatable="yes" context="shortcut window">Highlight text</property>
                 <property name="action-name">win.highlight-annotation</property>
+              </object>
+            </child>
+            <child>
+              <object class="GtkShortcutsShortcut">
+                <property name="visible">True</property>
+                <property name="title" translatable="yes" context="shortcut window">Delete the selected highlight</property>
+                <property name="action-name">win.delete-annotation</property>
+              </object>
+            </child>
+            <child>
+              <object class="GtkShortcutsShortcut">
+                <property name="visible">True</property>
+                <property name="title" translatable="yes" context="shortcut window">Undo the last annotation change</property>
+                <property name="action-name">win.undo</property>
+              </object>
+            </child>
+            <child>
+              <object class="GtkShortcutsShortcut">
+                <property name="visible">True</property>
+                <property name="title" translatable="yes" context="shortcut window">Redo the last annotation change</property>
+                <property name="action-name">win.redo</property>
               </object>
             </child>
           </object>

@@ -9,6 +9,11 @@
     padding: 10px;
 }
 
+.ev-document-modified .title,
+.ev-document-modified .subtitle {
+    color: #e66100;
+}
+
 .content-view.document-page {
     border-style: solid;
     border-width: 3px 3px 6px 4px;

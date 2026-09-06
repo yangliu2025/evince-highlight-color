@@ -213,6 +213,14 @@ typedef struct {
 	gboolean is_modified;
 	guint modified_handler_id;
 
+	/* Annotation edits that can be undone/redone, newest first */
+	GQueue *undo_stack;
+	GQueue *redo_stack;
+	gboolean in_undo_redo;
+
+	/* Set while overwriting the document with our own changes */
+	gboolean saving_in_place;
+
 	/* Load params */
 	EvLinkDest       *dest;
 	gchar            *search_string;
@@ -400,10 +408,42 @@ static void	ev_window_cancel_add_annot		(EvWindow *window);
 static void     ev_window_cmd_toggle_edit_annots 	(GSimpleAction *action,
 							 GVariant      *state,
 							 gpointer       user_data);
+static void     ev_window_recolor_annotation            (EvWindow         *ev_window,
+							 EvAnnotation     *annot,
+							 const GdkRGBA    *color);
 
 static gchar *nautilus_sendto = NULL;
 
 G_DEFINE_TYPE_WITH_PRIVATE (EvWindow, ev_window, HDY_TYPE_APPLICATION_WINDOW)
+
+/* Maximum number of annotation edits that can be undone. */
+#define EV_WINDOW_MAX_UNDO_DEPTH 20
+
+typedef enum {
+	EV_UNDO_ANNOT_ADDED,
+	EV_UNDO_ANNOT_REMOVED,
+	EV_UNDO_ANNOT_RECOLORED
+} EvUndoType;
+
+typedef struct {
+	EvUndoType    type;
+	EvAnnotation *annot;
+	GdkRGBA       old_color;
+	GdkRGBA       new_color;
+} EvUndoItem;
+
+static void
+ev_undo_item_free (EvUndoItem *item)
+{
+	g_clear_object (&item->annot);
+	g_free (item);
+}
+
+static void
+ev_undo_stack_free (GQueue *stack)
+{
+	g_queue_free_full (stack, (GDestroyNotify) ev_undo_item_free);
+}
 
 static gboolean
 ev_window_is_recent_view (EvWindow *ev_window)
@@ -423,6 +463,154 @@ ev_window_set_action_enabled (EvWindow   *ev_window,
 	action = g_action_map_lookup_action (G_ACTION_MAP (ev_window), name);
 	g_simple_action_set_enabled (G_SIMPLE_ACTION (action), enabled);
 }
+
+static void
+ev_window_set_modified_style (EvWindow *ev_window,
+			      gboolean  modified)
+{
+	EvWindowPrivate *priv = GET_PRIVATE (ev_window);
+	GtkStyleContext *context;
+
+	if (priv->is_modified == modified)
+		return;
+
+	priv->is_modified = modified;
+
+	context = gtk_widget_get_style_context (GTK_WIDGET (ev_window_get_toolbar (ev_window)));
+	if (modified)
+		gtk_style_context_add_class (context, "ev-document-modified");
+	else
+		gtk_style_context_remove_class (context, "ev-document-modified");
+}
+
+static void
+ev_window_update_undo_actions (EvWindow *ev_window)
+{
+	EvWindowPrivate *priv = GET_PRIVATE (ev_window);
+
+	if (!priv->undo_stack)
+		return;
+
+	ev_window_set_action_enabled (ev_window, "undo",
+				      !g_queue_is_empty (priv->undo_stack));
+	ev_window_set_action_enabled (ev_window, "redo",
+				      !g_queue_is_empty (priv->redo_stack));
+}
+
+static void
+ev_window_clear_undo_history (EvWindow *ev_window)
+{
+	EvWindowPrivate *priv = GET_PRIVATE (ev_window);
+
+	if (!priv->undo_stack)
+		return;
+
+	g_queue_clear_full (priv->undo_stack, (GDestroyNotify) ev_undo_item_free);
+	g_queue_clear_full (priv->redo_stack, (GDestroyNotify) ev_undo_item_free);
+	ev_window_update_undo_actions (ev_window);
+}
+
+static void
+ev_window_push_undo_item (EvWindow   *ev_window,
+			  GQueue     *stack,
+			  EvUndoItem *item)
+{
+	g_queue_push_head (stack, item);
+
+	while (g_queue_get_length (stack) > EV_WINDOW_MAX_UNDO_DEPTH)
+		ev_undo_item_free (g_queue_pop_tail (stack));
+
+	ev_window_update_undo_actions (ev_window);
+}
+
+/* Records a fresh edit: doing something new invalidates the redo branch. */
+static void
+ev_window_record_undo_item (EvWindow     *ev_window,
+			    EvUndoType    type,
+			    EvAnnotation *annot,
+			    const GdkRGBA *old_color,
+			    const GdkRGBA *new_color)
+{
+	EvWindowPrivate *priv = GET_PRIVATE (ev_window);
+	EvUndoItem *item;
+
+	if (priv->in_undo_redo || !priv->undo_stack)
+		return;
+
+	item = g_new0 (EvUndoItem, 1);
+	item->type = type;
+	item->annot = g_object_ref (annot);
+	if (old_color)
+		item->old_color = *old_color;
+	if (new_color)
+		item->new_color = *new_color;
+
+	g_queue_clear_full (priv->redo_stack, (GDestroyNotify) ev_undo_item_free);
+	ev_window_push_undo_item (ev_window, priv->undo_stack, item);
+}
+
+static void
+ev_window_apply_undo_item (EvWindow   *ev_window,
+			   EvUndoItem *item,
+			   gboolean    undo)
+{
+	EvWindowPrivate *priv = GET_PRIVATE (ev_window);
+	EvView *view = EV_VIEW (priv->view);
+	gboolean restore = (item->type == EV_UNDO_ANNOT_REMOVED) == undo;
+
+	priv->in_undo_redo = TRUE;
+
+	switch (item->type) {
+	case EV_UNDO_ANNOT_ADDED:
+	case EV_UNDO_ANNOT_REMOVED:
+		if (restore)
+			ev_view_add_annotation (view, item->annot);
+		else
+			ev_view_remove_annotation (view, item->annot);
+		break;
+	case EV_UNDO_ANNOT_RECOLORED:
+		ev_window_recolor_annotation (ev_window, item->annot,
+					      undo ? &item->old_color : &item->new_color);
+		break;
+	}
+
+	priv->in_undo_redo = FALSE;
+}
+
+static void
+ev_window_cmd_undo (GSimpleAction *action,
+		    GVariant      *parameter,
+		    gpointer       user_data)
+{
+	EvWindow *ev_window = user_data;
+	EvWindowPrivate *priv = GET_PRIVATE (ev_window);
+	EvUndoItem *item;
+
+	item = g_queue_pop_head (priv->undo_stack);
+	if (!item)
+		return;
+
+	ev_window_apply_undo_item (ev_window, item, TRUE);
+	ev_window_push_undo_item (ev_window, priv->redo_stack, item);
+}
+
+static void
+ev_window_cmd_redo (GSimpleAction *action,
+		    GVariant      *parameter,
+		    gpointer       user_data)
+{
+	EvWindow *ev_window = user_data;
+	EvWindowPrivate *priv = GET_PRIVATE (ev_window);
+	EvUndoItem *item;
+
+	item = g_queue_pop_head (priv->redo_stack);
+	if (!item)
+		return;
+
+	ev_window_apply_undo_item (ev_window, item, FALSE);
+	ev_window_push_undo_item (ev_window, priv->undo_stack, item);
+}
+
 
 static void
 ev_window_update_actions_sensitivity (EvWindow *ev_window)
@@ -501,6 +689,9 @@ ev_window_update_actions_sensitivity (EvWindow *ev_window)
 
 	/* File menu */
 	ev_window_set_action_enabled (ev_window, "open-copy", has_document);
+	ev_window_set_action_enabled (ev_window, "save", has_document &&
+				      ok_to_copy && !recent_view_mode &&
+				      ev_document_get_modified (document));
 	ev_window_set_action_enabled (ev_window, "save-as", has_document &&
 				      ok_to_copy && !recent_view_mode);
 	ev_window_set_action_enabled (ev_window, "print", has_pages &&
@@ -527,6 +718,8 @@ ev_window_update_actions_sensitivity (EvWindow *ev_window)
 	ev_window_set_action_enabled (ev_window, "toggle-find", can_find &&
 				      !recent_view_mode);
 	ev_window_set_action_enabled (ev_window, "add-annotation", can_annotate &&
+				      !recent_view_mode);
+	ev_window_set_action_enabled (ev_window, "delete-annotation", can_annotate &&
 				      !recent_view_mode);
 	ev_window_set_action_enabled (ev_window, "highlight-annotation", can_annotate &&
 				      !recent_view_mode);
@@ -1782,7 +1975,8 @@ ev_window_set_document (EvWindow *ev_window, EvDocument *document)
 		ev_window_run_presentation (ev_window);
 	}
 
-	priv->is_modified = FALSE;
+	ev_window_set_modified_style (ev_window, ev_document_get_modified (document));
+	ev_window_clear_undo_history (ev_window);
 	priv->modified_handler_id = g_signal_connect (document, "notify::modified", G_CALLBACK (ev_window_document_modified_cb), ev_window);
 
 	if (priv->setup_document_idle > 0)
@@ -1796,6 +1990,12 @@ ev_window_file_changed (EvWindow *ev_window,
 			gpointer  user_data)
 {
 	EvWindowPrivate *priv = GET_PRIVATE (ev_window);
+
+	/* We are the ones who just rewrote the file, there is nothing to pick up. */
+	if (priv->saving_in_place) {
+		priv->saving_in_place = FALSE;
+		return;
+	}
 
 	if (priv->settings &&
 	    g_settings_get_boolean (priv->settings, GS_AUTO_RELOAD))
@@ -3148,6 +3348,7 @@ ev_window_save_job_cb (EvJob     *job,
 	EvWindowPrivate *priv = GET_PRIVATE (window);
 	if (ev_job_is_failed (job)) {
 		priv->close_after_save = FALSE;
+		priv->saving_in_place = FALSE;
 		ev_window_error_message (window, job->error,
 					 _("The file could not be saved as “%s”."),
 					 EV_JOB_SAVE (job)->uri);
@@ -3155,10 +3356,34 @@ ev_window_save_job_cb (EvJob     *job,
 		ev_window_add_recent (window, EV_JOB_SAVE (job)->uri);
 	}
 
+	if (priv->document) {
+		ev_window_set_modified_style (window, ev_document_get_modified (priv->document));
+		ev_window_update_actions_sensitivity (window);
+	}
+
 	ev_window_clear_save_job (window);
 
 	if (priv->close_after_save)
 		g_idle_add ((GSourceFunc)destroy_window, window);
+}
+
+static void
+ev_window_save_to_uri (EvWindow    *ev_window,
+		       const gchar *uri)
+{
+	EvWindowPrivate *priv = GET_PRIVATE (ev_window);
+
+	/* FIXME: remote copy should be done here rather than in the save job,
+	 * so that we can track progress and cancel the operation
+	 */
+
+	ev_window_clear_save_job (ev_window);
+	priv->save_job = ev_job_save_new (priv->document, uri, priv->uri);
+	g_signal_connect (priv->save_job, "finished",
+			  G_CALLBACK (ev_window_save_job_cb),
+			  ev_window);
+	/* The priority doesn't matter for this job */
+	ev_job_scheduler_push_job (priv->save_job, EV_JOB_PRIORITY_NONE);
 }
 
 static void
@@ -3180,18 +3405,7 @@ file_save_dialog_response_cb (GtkWidget *fc,
 
 	uri = gtk_file_chooser_get_uri (GTK_FILE_CHOOSER (fc));
 
-	/* FIXME: remote copy should be done here rather than in the save job,
-	 * so that we can track progress and cancel the operation
-	 */
-
-	ev_window_clear_save_job (ev_window);
-	priv->save_job = ev_job_save_new (priv->document,
-						     uri, priv->uri);
-	g_signal_connect (priv->save_job, "finished",
-			  G_CALLBACK (ev_window_save_job_cb),
-			  ev_window);
-	/* The priority doesn't matter for this job */
-	ev_job_scheduler_push_job (priv->save_job, EV_JOB_PRIORITY_NONE);
+	ev_window_save_to_uri (ev_window, uri);
 
 	g_free (uri);
 	g_object_unref (fc);
@@ -3259,6 +3473,41 @@ ev_window_cmd_save_as (GSimpleAction *action,
 	EvWindow *window = user_data;
 
 	ev_window_save_as (window);
+}
+
+/* Overwrites the file the document was loaded from. Falls back to Save As when
+ * that file cannot be written to, so the changes are never silently dropped. */
+static void
+ev_window_cmd_save (GSimpleAction *action,
+		    GVariant      *parameter,
+		    gpointer       user_data)
+{
+	EvWindow *ev_window = user_data;
+	EvWindowPrivate *priv = GET_PRIVATE (ev_window);
+	g_autoptr (GFile) file = NULL;
+	g_autoptr (GFileInfo) info = NULL;
+
+	if (!priv->document || !priv->uri)
+		return;
+
+	if (!ev_document_get_modified (priv->document))
+		return;
+
+	file = g_file_new_for_uri (priv->uri);
+	/* Only probed for local files: a query on a gvfs mount would block the UI. */
+	if (g_file_is_native (file)) {
+		info = g_file_query_info (file, G_FILE_ATTRIBUTE_ACCESS_CAN_WRITE,
+					  G_FILE_QUERY_INFO_NONE, NULL, NULL);
+		if (info &&
+		    g_file_info_has_attribute (info, G_FILE_ATTRIBUTE_ACCESS_CAN_WRITE) &&
+		    !g_file_info_get_attribute_boolean (info, G_FILE_ATTRIBUTE_ACCESS_CAN_WRITE)) {
+			ev_window_save_as (ev_window);
+			return;
+		}
+	}
+
+	priv->saving_in_place = TRUE;
+	ev_window_save_to_uri (ev_window, priv->uri);
 }
 
 static void
@@ -5296,24 +5545,13 @@ ev_window_document_modified_cb (EvDocument *document,
                                 GParamSpec *pspec,
                                 EvWindow   *ev_window)
 {
-	EvWindowPrivate *priv = GET_PRIVATE (ev_window);
-	HdyHeaderBar *toolbar = ev_window_get_toolbar (ev_window);
-	const gchar *title = hdy_header_bar_get_title (toolbar);
-	gchar *new_title;
-
-	if (priv->is_modified)
+	/* The unmodified notification comes from the save job thread, so the UI is
+	 * refreshed from ev_window_save_job_cb() instead. */
+	if (!ev_document_get_modified (document))
 		return;
 
-	priv->is_modified = TRUE;
-	if (gtk_widget_get_direction (GTK_WIDGET (ev_window)) == GTK_TEXT_DIR_RTL)
-		new_title = g_strconcat ("• ", title, NULL);
-	else
-		new_title = g_strconcat (title, " •", NULL);
-
-	if (new_title) {
-		hdy_header_bar_set_title (toolbar, new_title);
-		g_free (new_title);
-	}
+	ev_window_set_modified_style (ev_window, TRUE);
+	ev_window_update_actions_sensitivity (ev_window);
 }
 
 static void
@@ -6237,9 +6475,15 @@ ev_window_recolor_annotation (EvWindow      *ev_window,
 			      const GdkRGBA *color)
 {
 	EvWindowPrivate *priv = GET_PRIVATE (ev_window);
+	GdkRGBA old_color;
+
+	ev_annotation_get_rgba (annot, &old_color);
 
 	if (!ev_annotation_set_rgba (annot, color))
 		return;
+
+	ev_window_record_undo_item (ev_window, EV_UNDO_ANNOT_RECOLORED, annot,
+				    &old_color, color);
 
 	ev_document_doc_mutex_lock ();
 	ev_document_annotations_save_annotation (EV_DOCUMENT_ANNOTATIONS (priv->document),
@@ -6325,6 +6569,20 @@ ev_window_cmd_add_annotation (GSimpleAction *action,
 }
 
 static void
+ev_window_cmd_delete_annotation (GSimpleAction *action,
+				 GVariant      *parameter,
+				 gpointer       user_data)
+{
+	EvWindow *ev_window = user_data;
+	EvWindowPrivate *priv = GET_PRIVATE (ev_window);
+	EvAnnotation *annot;
+
+	annot = ev_view_get_selected_annotation (EV_VIEW (priv->view));
+	if (annot)
+		ev_view_remove_annotation (EV_VIEW (priv->view), annot);
+}
+
+static void
 ev_window_cmd_toggle_edit_annots (GSimpleAction *action,
 				  GVariant      *state,
 				  gpointer       user_data)
@@ -6365,6 +6623,9 @@ ev_window_dispose (GObject *object)
 
 	g_clear_object (&priv->bookmarks);
 	g_clear_object (&priv->metadata);
+
+	g_clear_pointer (&priv->undo_stack, ev_undo_stack_free);
+	g_clear_pointer (&priv->redo_stack, ev_undo_stack_free);
 
 	if (priv->setup_document_idle > 0) {
 		g_source_remove (priv->setup_document_idle);
@@ -6540,6 +6801,7 @@ static const GActionEntry actions[] = {
 	{ "new", ev_window_cmd_new_window },
 	{ "open", ev_window_cmd_file_open },
 	{ "open-copy", ev_window_cmd_file_open_copy },
+	{ "save", ev_window_cmd_save },
 	{ "save-as", ev_window_cmd_save_as },
 	{ "send-to", ev_window_cmd_send_to },
 	{ "open-containing-folder", ev_window_cmd_open_containing_folder },
@@ -6587,6 +6849,9 @@ static const GActionEntry actions[] = {
 	{ "toggle-menu", ev_window_cmd_action_menu },
 	{ "caret-navigation", NULL, NULL, "false", ev_window_cmd_view_toggle_caret_navigation },
 	{ "add-annotation", NULL, NULL, "false", ev_window_cmd_add_annotation },
+	{ "delete-annotation", ev_window_cmd_delete_annotation },
+	{ "undo", ev_window_cmd_undo },
+	{ "redo", ev_window_cmd_redo },
 	{ "highlight-annotation", ev_window_cmd_add_highlight_annotation },
 	{ "highlight-annotation-color", ev_window_cmd_highlight_annotation_color, "s" },
 	{ "highlight-color", ev_window_cmd_highlight_color_index, "i" },
@@ -6676,6 +6941,7 @@ view_annot_added (EvView       *view,
 {
 	EvWindowPrivate *priv = GET_PRIVATE (window);
 
+	ev_window_record_undo_item (window, EV_UNDO_ANNOT_ADDED, annot, NULL, NULL);
 	ev_sidebar_annotations_annot_added (EV_SIDEBAR_ANNOTATIONS (priv->sidebar_annots),
 					    annot);
 	ev_annotations_toolbar_add_annot_finished (EV_ANNOTATIONS_TOOLBAR (priv->annots_toolbar));
@@ -6707,6 +6973,7 @@ view_annot_removed (EvView       *view,
 {
 	EvWindowPrivate *priv = GET_PRIVATE (window);
 
+	ev_window_record_undo_item (window, EV_UNDO_ANNOT_REMOVED, annot, NULL, NULL);
 	ev_sidebar_annotations_annot_removed (EV_SIDEBAR_ANNOTATIONS (priv->sidebar_annots));
 }
 
@@ -7722,6 +7989,9 @@ ev_window_init (EvWindow *ev_window)
 	priv->chrome = EV_CHROME_NORMAL;
         priv->presentation_mode_inhibit_id = 0;
 
+	priv->undo_stack = g_queue_new ();
+	priv->redo_stack = g_queue_new ();
+
 	priv->history = ev_history_new (priv->model);
 	g_signal_connect (priv->history, "activate-link",
 			  G_CALLBACK (activate_link_cb),
@@ -8116,6 +8386,7 @@ ev_window_init (EvWindow *ev_window)
 
         ev_window_sizing_mode_changed_cb (priv->model, NULL, ev_window);
 	ev_window_update_actions_sensitivity (ev_window);
+	ev_window_update_undo_actions (ev_window);
 
 	/* Drag and Drop */
 	gtk_drag_dest_set (GTK_WIDGET (ev_window),

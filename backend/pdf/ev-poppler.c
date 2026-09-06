@@ -3092,6 +3092,11 @@ pdf_document_annotations_remove_annotation (EvDocumentAnnotations *document_anno
                                                              GINT_TO_POINTER (page->index));
         if (mapping_list) {
                 annot_mapping = ev_mapping_list_find (mapping_list, annot);
+                /* The mapping dies here, so the callback holding it must go first:
+                 * the annotation can outlive it when something else keeps a reference. */
+                g_signal_handlers_disconnect_by_func (annot,
+                                                      G_CALLBACK (annot_area_changed_cb),
+                                                      annot_mapping);
                 ev_mapping_list_remove (mapping_list, annot_mapping);
 		if (ev_mapping_list_length (mapping_list) == 0)
 			g_hash_table_remove (pdf_document->annots, GINT_TO_POINTER (page->index));

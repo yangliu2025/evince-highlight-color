@@ -16,7 +16,8 @@ set -euo pipefail
 # newer upstream tarball.
 BASE_REF="upstream/46.3.1"
 PATCH_NAME="highlight-annotation-colors.patch"
-NEW_SYMBOLS=(ev_view_get_selected_annotation ev_view_set_annotation_color)
+PATCH_PATHS=(backend libview shell)
+NEW_SYMBOLS=(ev_view_add_annotation ev_view_get_selected_annotation ev_view_set_annotation_color)
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 WORKDIR="${1:-$PWD/evince-deb-build}"
@@ -47,7 +48,7 @@ if [[ $INSTALLED == "$ARCHIVE_VERSION"+hl* ]]; then
 fi
 LOCAL_VERSION="${ARCHIVE_VERSION}+hl${suffix}"
 
-git -C "$REPO" diff "$BASE_REF" HEAD -- libview shell > "debian/patches/$PATCH_NAME"
+git -C "$REPO" diff "$BASE_REF" HEAD -- "${PATCH_PATHS[@]}" > "debian/patches/$PATCH_NAME"
 grep -qxF "$PATCH_NAME" debian/patches/series || echo "$PATCH_NAME" >> debian/patches/series
 
 # dpkg-gensymbols only fails on *removed* symbols, but keep the file honest.
@@ -74,6 +75,5 @@ cat <<EOF
 Built in $(cd .. && pwd). Install with:
 
   cd $(cd .. && pwd)
-  sudo apt install ./evince_*_amd64.deb ./evince-common_*_all.deb \\
-                   ./libevdocument3-4t64_*_amd64.deb ./libevview3-3t64_*_amd64.deb
+  sudo apt install ./evince_*_amd64.deb ./evince-common_*_all.deb ./libevdocument3-4t64_*_amd64.deb ./libevview3-3t64_*_amd64.deb
 EOF
