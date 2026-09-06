@@ -16,7 +16,7 @@ set -euo pipefail
 # newer upstream tarball.
 BASE_REF="upstream/46.3.1"
 PATCH_NAME="highlight-annotation-colors.patch"
-NEW_SYMBOL="ev_view_set_annotation_color"
+NEW_SYMBOLS=(ev_view_get_selected_annotation ev_view_set_annotation_color)
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 WORKDIR="${1:-$PWD/evince-deb-build}"
@@ -52,8 +52,11 @@ grep -qxF "$PATCH_NAME" debian/patches/series || echo "$PATCH_NAME" >> debian/pa
 
 # dpkg-gensymbols only fails on *removed* symbols, but keep the file honest.
 symbols=debian/libevview3-3t64.symbols
-if [[ -f $symbols ]] && ! grep -q "$NEW_SYMBOL" "$symbols"; then
-	sed -i "/^ ev_view_set_enable_spellchecking@Base/i\\ $NEW_SYMBOL@Base $LOCAL_VERSION" "$symbols"
+if [[ -f $symbols ]]; then
+	for sym in "${NEW_SYMBOLS[@]}"; do
+		grep -q "$sym" "$symbols" ||
+			sed -i "/^ ev_view_set_enable_spellchecking@Base/i\\ $sym@Base $LOCAL_VERSION" "$symbols"
+	done
 fi
 
 QUILT_PATCHES=debian/patches quilt push -a
