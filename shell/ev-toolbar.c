@@ -52,6 +52,8 @@ typedef struct {
 	GtkWidget *find_button;
 	GtkWidget *action_menu_button;
 
+	GtkCssProvider *annots_color_provider;
+
 	EvToolbarMode toolbar_mode;
 } EvToolbarPrivate;
 
@@ -124,6 +126,16 @@ ev_toolbar_constructed (GObject *object)
 }
 
 static void
+ev_toolbar_dispose (GObject *object)
+{
+	EvToolbarPrivate *priv = GET_PRIVATE (EV_TOOLBAR (object));
+
+	g_clear_object (&priv->annots_color_provider);
+
+	G_OBJECT_CLASS (ev_toolbar_parent_class)->dispose (object);
+}
+
+static void
 ev_toolbar_class_init (EvToolbarClass *klass)
 {
         GObjectClass *g_object_class = G_OBJECT_CLASS (klass);
@@ -131,6 +143,7 @@ ev_toolbar_class_init (EvToolbarClass *klass)
 
         g_object_class->set_property = ev_toolbar_set_property;
         g_object_class->constructed = ev_toolbar_constructed;
+        g_object_class->dispose = ev_toolbar_dispose;
 
 	gtk_widget_class_set_template_from_resource (widget_class, "/org/gnome/evince/ui/ev-toolbar.ui");
 	gtk_widget_class_bind_template_child_private (widget_class, EvToolbar, header_bar);
@@ -263,4 +276,44 @@ ev_toolbar_get_mode (EvToolbar *ev_toolbar)
         priv = GET_PRIVATE (ev_toolbar);
 
         return priv->toolbar_mode;
+}
+
+/**
+ * ev_toolbar_set_annotation_color:
+ * @ev_toolbar: an #EvToolbar
+ * @color: the colour the next highlight will be created with
+ *
+ * Paints the annotate button with @color so that the colour Ctrl+H would
+ * use is always visible.
+ */
+void
+ev_toolbar_set_annotation_color (EvToolbar     *ev_toolbar,
+                                 const GdkRGBA *color)
+{
+        EvToolbarPrivate *priv;
+        gchar            *color_str;
+        gchar            *css;
+        gdouble           luminance;
+
+        g_return_if_fail (EV_IS_TOOLBAR (ev_toolbar));
+        g_return_if_fail (color != NULL);
+
+        priv = GET_PRIVATE (ev_toolbar);
+
+        if (!priv->annots_color_provider) {
+                priv->annots_color_provider = gtk_css_provider_new ();
+                gtk_style_context_add_provider (gtk_widget_get_style_context (priv->annots_button),
+                                                GTK_STYLE_PROVIDER (priv->annots_color_provider),
+                                                GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+        }
+
+        /* The icon is symbolic, so it is painted in the inherited foreground
+         * colour: pick the one that stays legible on top of the swatch. */
+        luminance = 0.2126 * color->red + 0.7152 * color->green + 0.0722 * color->blue;
+        color_str = gdk_rgba_to_string (color);
+        css = g_strdup_printf ("button { background-image: none; background-color: %s; color: %s; }",
+                               color_str, luminance > 0.5 ? "#000000" : "#ffffff");
+        gtk_css_provider_load_from_data (priv->annots_color_provider, css, -1, NULL);
+        g_free (css);
+        g_free (color_str);
 }

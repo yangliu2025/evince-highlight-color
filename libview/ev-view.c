@@ -3934,6 +3934,24 @@ ev_view_set_annotation_color (EvView        *view,
 	view->adding_annot_info.color = *color;
 }
 
+/**
+ * ev_view_get_selected_annotation:
+ * @view: an #EvView
+ *
+ * Returns: (transfer none) (nullable): the text markup annotation the user
+ * selected by clicking on it, or %NULL if none is selected.
+ */
+EvAnnotation *
+ev_view_get_selected_annotation (EvView *view)
+{
+	g_return_val_if_fail (EV_IS_VIEW (view), NULL);
+
+	if (!view->focused_element || !EV_IS_ANNOTATION_TEXT_MARKUP (view->focused_element->data))
+		return NULL;
+
+	return EV_ANNOTATION (view->focused_element->data);
+}
+
 void
 ev_view_cancel_add_annotation (EvView *view)
 {
@@ -4869,6 +4887,26 @@ should_draw_caret_cursor (EvView  *view,
 		!ev_pixbuf_cache_get_selection_region (view->pixbuf_cache, page, view->scale));
 }
 
+/* A single click selects a text markup annotation. The themed focus ring is
+ * too faint on top of a coloured mark, so outline it with a black dashed line
+ * over a white one, which stays legible on any background. */
+static void
+draw_selected_annotation (cairo_t            *cr,
+			  const GdkRectangle *rect)
+{
+	static const double dashes[] = { 3.0, 3.0 };
+
+	cairo_save (cr);
+	cairo_rectangle (cr, rect->x + 0.5, rect->y + 0.5, rect->width, rect->height);
+	cairo_set_line_width (cr, 1.0);
+	cairo_set_source_rgb (cr, 1., 1., 1.);
+	cairo_stroke_preserve (cr);
+	cairo_set_source_rgb (cr, 0., 0., 0.);
+	cairo_set_dash (cr, dashes, G_N_ELEMENTS (dashes), 0);
+	cairo_stroke (cr);
+	cairo_restore (cr);
+}
+
 static void
 draw_focus (EvView       *view,
 	    cairo_t      *cr,
@@ -4888,14 +4926,20 @@ draw_focus (EvView       *view,
 	if (!ev_view_get_focused_area (view, &rect))
 		return;
 
-	if (gdk_rectangle_intersect (&rect, clip, &intersect)) {
-		gtk_render_focus (gtk_widget_get_style_context (widget),
-				  cr,
-				  intersect.x,
-				  intersect.y,
-				  intersect.width,
-				  intersect.height);
+	if (!gdk_rectangle_intersect (&rect, clip, &intersect))
+		return;
+
+	if (EV_IS_ANNOTATION_TEXT_MARKUP (view->focused_element->data)) {
+		draw_selected_annotation (cr, &rect);
+		return;
 	}
+
+	gtk_render_focus (gtk_widget_get_style_context (widget),
+			  cr,
+			  intersect.x,
+			  intersect.y,
+			  intersect.width,
+			  intersect.height);
 }
 
 #ifdef EV_ENABLE_DEBUG
@@ -5710,11 +5754,27 @@ ev_view_button_press_event (GtkWidget      *widget,
 			EvAnnotation *annot;
 			EvFormField *field;
 			EvMapping *link;
+			EvMapping *markup_mapping;
 			EvMedia *media;
 			gint page;
 
 			if (event->state & GDK_CONTROL_MASK)
 				return ev_view_synctex_backward_search (view, event->x , event->y);
+
+			/* A text markup annotation (e.g. a highlight) is selected by a
+			 * single click and opens its note on a double click. The
+			 * selection is deferred to the button release so that dragging
+			 * across it still selects the text underneath. */
+			view->pressed_markup_annot = NULL;
+			markup_mapping = get_annotation_mapping_at_location (view, event->x, event->y, &page);
+			if (markup_mapping && EV_IS_ANNOTATION_TEXT_MARKUP (markup_mapping->data)) {
+				if (event->type == GDK_2BUTTON_PRESS) {
+					ev_view_handle_annotation (view, markup_mapping->data,
+								   event->x, event->y, event->time);
+					return TRUE;
+				}
+				view->pressed_markup_annot = markup_mapping->data;
+			}
 
 			if (EV_IS_SELECTION (view->document) && view->selection_info.selections) {
 				if (event->type == GDK_3BUTTON_PRESS) {
@@ -6452,8 +6512,10 @@ ev_view_button_release_event (GtkWidget      *widget,
 {
 	EvView *view = EV_VIEW (widget);
 	EvLink *link = NULL;
+	EvAnnotation *pressed_markup_annot = view->pressed_markup_annot;
 
 	view->image_dnd_info.in_drag = FALSE;
+	view->pressed_markup_annot = NULL;
 
 	if (gtk_gesture_is_recognized (view->zoom_gesture))
 		return TRUE;
@@ -6560,10 +6622,23 @@ ev_view_button_release_event (GtkWidget      *widget,
 	}
 
 	if (view->pressed_button == 1) {
-		EvAnnotation *annot = ev_view_get_annotation_at_location (view, event->x, event->y);
+		EvMapping    *mapping;
+		EvAnnotation *annot;
+		gint          page;
 
-		if (annot)
+		mapping = get_annotation_mapping_at_location (view, event->x, event->y, &page);
+		annot = mapping ? mapping->data : NULL;
+
+		if (annot && EV_IS_ANNOTATION_TEXT_MARKUP (annot)) {
+			/* Selecting the mark replaces opening its note, which is
+			 * now bound to the double click. */
+			if (annot == pressed_markup_annot &&
+			    !view->selection_info.selections &&
+			    view->focused_element != mapping)
+				_ev_view_set_focused_element (view, mapping, page);
+		} else if (annot) {
 			ev_view_handle_annotation (view, annot, event->x, event->y, event->time);
+		}
 	}
 
 	if (view->pressed_button == 2) {

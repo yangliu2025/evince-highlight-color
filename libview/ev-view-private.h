@@ -243,6 +243,9 @@ struct _EvView {
 	MovingAnnotInfo    moving_annot_info;
 	GHashTable        *annot_window_map;
 	gboolean           enable_spellchecking;
+	/* Text markup annotation under the last button press, only used to
+	 * compare against the one under the matching button release. */
+	EvAnnotation      *pressed_markup_annot;
 
 	/* Focus */
 	EvMapping *focused_element;

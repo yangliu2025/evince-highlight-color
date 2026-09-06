@@ -175,6 +175,8 @@ EV_PUBLIC
 void           ev_view_set_annotation_color  (EvView          *view,
 					      const GdkRGBA   *color);
 EV_PUBLIC
+EvAnnotation  *ev_view_get_selected_annotation (EvView        *view);
+EV_PUBLIC
 gboolean       ev_view_add_text_markup_annotation_for_selected_text (EvView  *view);
 EV_PUBLIC
 void           ev_view_set_enable_spellchecking (EvView *view,

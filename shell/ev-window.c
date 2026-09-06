@@ -180,6 +180,9 @@ typedef struct {
 	EvImage      *image;
 	EvAnnotation *annot;
 
+	/* Highlight palette, in menu order, used by the number key shortcuts */
+	GArray       *highlight_colors;
+
 	/* Popup attachment */
 	GMenuModel   *attachment_popup_menu;
 	GtkWidget    *attachment_popup;
@@ -528,6 +531,8 @@ ev_window_update_actions_sensitivity (EvWindow *ev_window)
 	ev_window_set_action_enabled (ev_window, "highlight-annotation", can_annotate &&
 				      !recent_view_mode);
 	ev_window_set_action_enabled (ev_window, "highlight-annotation-color", can_annotate &&
+				      !recent_view_mode);
+	ev_window_set_action_enabled (ev_window, "highlight-color", can_annotate &&
 				      !recent_view_mode);
 	ev_window_set_action_enabled (ev_window, "toggle-edit-annots", can_annotate &&
 				      !recent_view_mode);
@@ -5663,12 +5668,11 @@ ev_window_create_color_swatch (const gchar *color_spec)
 }
 
 /* GtkBuilder menu XML has no way to express a colour swatch, so paint one for
- * every colour item once the model has been loaded. Also reports the first
- * colour of the palette, which seeds the default used by Ctrl+H. */
+ * every colour item once the model has been loaded. Also collects the palette
+ * in menu order, which is what the number key shortcuts index into. */
 static void
 ev_window_add_color_swatches (GMenuModel *model,
-			      GdkRGBA    *first_color,
-			      gboolean   *have_first)
+			      GArray     *palette)
 {
 	gint i;
 
@@ -5687,7 +5691,7 @@ ev_window_add_color_swatches (GMenuModel *model,
 		if (!link)
 			link = g_menu_model_get_item_link (model, i, G_MENU_LINK_SUBMENU);
 		if (link) {
-			ev_window_add_color_swatches (link, first_color, have_first);
+			ev_window_add_color_swatches (link, palette);
 			g_object_unref (link);
 			continue;
 		}
@@ -5705,9 +5709,12 @@ ev_window_add_color_swatches (GMenuModel *model,
 		target = g_menu_model_get_item_attribute_value (model, i,
 								G_MENU_ATTRIBUTE_TARGET,
 								G_VARIANT_TYPE_STRING);
-		if (target && !*have_first)
-			*have_first = gdk_rgba_parse (first_color,
-						      g_variant_get_string (target, NULL));
+		if (target) {
+			GdkRGBA rgba;
+
+			if (gdk_rgba_parse (&rgba, g_variant_get_string (target, NULL)))
+				g_array_append_val (palette, rgba);
+		}
 
 		/* Highlights are pale so they do not swamp the glyphs, which
 		 * makes for muddy swatches; x-swatch-color draws the same hue
@@ -6215,6 +6222,37 @@ ev_window_cmd_add_highlight_annotation (GSimpleAction *action,
 }
 
 static void
+ev_window_set_highlight_color (EvWindow      *ev_window,
+			       const GdkRGBA *color)
+{
+	EvWindowPrivate *priv = GET_PRIVATE (ev_window);
+
+	ev_view_set_annotation_color (EV_VIEW (priv->view), color);
+	ev_toolbar_set_annotation_color (EV_TOOLBAR (priv->toolbar), color);
+}
+
+static void
+ev_window_recolor_annotation (EvWindow      *ev_window,
+			      EvAnnotation  *annot,
+			      const GdkRGBA *color)
+{
+	EvWindowPrivate *priv = GET_PRIVATE (ev_window);
+
+	if (!ev_annotation_set_rgba (annot, color))
+		return;
+
+	ev_document_doc_mutex_lock ();
+	ev_document_annotations_save_annotation (EV_DOCUMENT_ANNOTATIONS (priv->document),
+						 annot,
+						 EV_ANNOTATIONS_SAVE_COLOR);
+	ev_document_doc_mutex_unlock ();
+
+	ev_view_reload (EV_VIEW (priv->view));
+	ev_sidebar_annotations_annot_changed (EV_SIDEBAR_ANNOTATIONS (priv->sidebar_annots),
+					      annot);
+}
+
+static void
 ev_window_cmd_highlight_annotation_color (GSimpleAction *action,
                                           GVariant      *parameter,
                                           gpointer       user_data)
@@ -6228,27 +6266,52 @@ ev_window_cmd_highlight_annotation_color (GSimpleAction *action,
 		return;
 	}
 
-	ev_view_set_annotation_color (EV_VIEW (priv->view), &color);
+	ev_window_set_highlight_color (ev_window, &color);
 
 	/* The popup was opened on top of an existing annotation: recolour it
 	 * instead of creating a new one. */
 	if (priv->annot && EV_IS_ANNOTATION_MARKUP (priv->annot)) {
-		if (!ev_annotation_set_rgba (priv->annot, &color))
-			return;
-
-		ev_document_doc_mutex_lock ();
-		ev_document_annotations_save_annotation (EV_DOCUMENT_ANNOTATIONS (priv->document),
-							 priv->annot,
-							 EV_ANNOTATIONS_SAVE_COLOR);
-		ev_document_doc_mutex_unlock ();
-
-		ev_view_reload (EV_VIEW (priv->view));
-		ev_sidebar_annotations_annot_changed (EV_SIDEBAR_ANNOTATIONS (priv->sidebar_annots),
-						      priv->annot);
+		ev_window_recolor_annotation (ev_window, priv->annot, &color);
 		return;
 	}
 
 	ev_window_begin_add_annot (ev_window, EV_ANNOTATION_TYPE_TEXT_MARKUP);
+}
+
+/* Number keys pick the nth palette colour: 1 is the first one and 0 the last.
+ * The colour is applied to the current selection or to the selected highlight,
+ * and always becomes the default for the next Ctrl+H. */
+static void
+ev_window_cmd_highlight_color_index (GSimpleAction *action,
+				     GVariant      *parameter,
+				     gpointer       user_data)
+{
+	EvWindow *ev_window = user_data;
+	EvWindowPrivate *priv = GET_PRIVATE (ev_window);
+	EvAnnotation *annot;
+	GdkRGBA *color;
+	gint32 digit;
+	guint index;
+
+	if (!priv->highlight_colors || priv->highlight_colors->len == 0)
+		return;
+
+	digit = g_variant_get_int32 (parameter);
+	index = (digit == 0) ? priv->highlight_colors->len - 1 : (guint) digit - 1;
+	if (index >= priv->highlight_colors->len)
+		return;
+
+	color = &g_array_index (priv->highlight_colors, GdkRGBA, index);
+	ev_window_set_highlight_color (ev_window, color);
+
+	if (ev_view_get_has_selection (EV_VIEW (priv->view))) {
+		ev_view_add_text_markup_annotation_for_selected_text (EV_VIEW (priv->view));
+		return;
+	}
+
+	annot = ev_view_get_selected_annotation (EV_VIEW (priv->view));
+	if (annot)
+		ev_window_recolor_annotation (ev_window, annot, color);
 }
 
 static void
@@ -6351,6 +6414,7 @@ ev_window_dispose (GObject *object)
 	g_clear_object (&priv->link);
 	g_clear_object (&priv->image);
 	g_clear_object (&priv->annot);
+	g_clear_pointer (&priv->highlight_colors, g_array_unref);
 
 	if (priv->attach_list) {
 		g_list_free_full (priv->attach_list, g_object_unref);
@@ -6525,6 +6589,7 @@ static const GActionEntry actions[] = {
 	{ "add-annotation", NULL, NULL, "false", ev_window_cmd_add_annotation },
 	{ "highlight-annotation", ev_window_cmd_add_highlight_annotation },
 	{ "highlight-annotation-color", ev_window_cmd_highlight_annotation_color, "s" },
+	{ "highlight-color", ev_window_cmd_highlight_color_index, "i" },
 	{ "toggle-edit-annots", NULL, NULL, "false", ev_window_cmd_toggle_edit_annots },
 	{ "about", ev_window_cmd_about },
 	{ "help", ev_window_cmd_help },
@@ -8024,14 +8089,11 @@ ev_window_init (EvWindow *ev_window)
 	/* Popups */
 	builder = gtk_builder_new_from_resource ("/org/gnome/evince/gtk/menus.ui");
 	priv->view_popup_menu = g_object_ref (G_MENU_MODEL (gtk_builder_get_object (builder, "view-popup-menu")));
-	{
-		GdkRGBA  first_color;
-		gboolean have_first = FALSE;
-
-		ev_window_add_color_swatches (priv->view_popup_menu, &first_color, &have_first);
-		if (have_first)
-			ev_view_set_annotation_color (EV_VIEW (priv->view), &first_color);
-	}
+	priv->highlight_colors = g_array_new (FALSE, FALSE, sizeof (GdkRGBA));
+	ev_window_add_color_swatches (priv->view_popup_menu, priv->highlight_colors);
+	if (priv->highlight_colors->len > 0)
+		ev_window_set_highlight_color (ev_window,
+					       &g_array_index (priv->highlight_colors, GdkRGBA, 0));
 	priv->attachment_popup_menu = g_object_ref (G_MENU_MODEL (gtk_builder_get_object (builder, "attachments-popup")));
 	g_object_unref (builder);
 

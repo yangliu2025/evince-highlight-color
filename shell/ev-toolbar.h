@@ -57,5 +57,7 @@ HdyHeaderBar *ev_toolbar_get_header_bar     (EvToolbar *ev_toolbar);
 void          ev_toolbar_set_mode           (EvToolbar     *ev_toolbar,
 					     EvToolbarMode  mode);
 EvToolbarMode ev_toolbar_get_mode           (EvToolbar     *ev_toolbar);
+void          ev_toolbar_set_annotation_color (EvToolbar     *ev_toolbar,
+					       const GdkRGBA *color);
 
 G_END_DECLS
