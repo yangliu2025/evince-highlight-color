@@ -3412,6 +3412,8 @@ ev_view_annotation_save_contents (EvView       *view,
 						 annot, EV_ANNOTATIONS_SAVE_CONTENTS);
 	ev_document_doc_mutex_unlock ();
 	g_signal_emit (view, signals[SIGNAL_ANNOT_CHANGED], 0, annot);
+	/* The note marker appears/disappears with the contents. */
+	gtk_widget_queue_draw (GTK_WIDGET (view));
 }
 
 static GtkWidget *
@@ -4944,6 +4946,79 @@ draw_selected_annotation (cairo_t            *cr,
 	cairo_restore (cr);
 }
 
+/* A text markup annotation renders identically whether or not it carries a
+ * note; only the tooltip gives it away. Flag the ones that have a note with a
+ * folded corner over the top-right of the annotation area. */
+static void
+draw_annotation_note_marks (EvView       *view,
+			    cairo_t      *cr,
+			    gint          page,
+			    GdkRectangle *clip)
+{
+	EvMappingList *annots;
+	GList         *l;
+	gboolean       inverted;
+	gdouble        halo;
+	gdouble        max_size;
+
+	annots = ev_page_cache_get_annot_mapping (view->page_cache, page);
+	if (!annots)
+		return;
+
+	inverted = ev_document_model_get_inverted_colors (view->model);
+	halo = inverted ? 0. : 1.;
+	max_size = CLAMP (4.0 * view->scale, 3.0, 7.0);
+
+	for (l = ev_mapping_list_get_list (annots); l && l->data; l = g_list_next (l)) {
+		EvMapping    *mapping = (EvMapping *)l->data;
+		EvAnnotation *annot = mapping->data;
+		const gchar  *contents;
+		GdkRectangle  rect, intersect;
+		GdkRGBA       color;
+		gdouble       x, y, size;
+
+		if (!EV_IS_ANNOTATION_TEXT_MARKUP (annot))
+			continue;
+
+		contents = ev_annotation_get_contents (annot);
+		if (!contents || *contents == '\0')
+			continue;
+
+		_ev_view_transform_doc_rect_to_view_rect (view, page, &mapping->area, &rect);
+		rect.x -= view->scroll_x;
+		rect.y -= view->scroll_y;
+
+		if (!gdk_rectangle_intersect (&rect, clip, &intersect))
+			continue;
+
+		size = MIN (max_size, MIN (rect.width, rect.height));
+		x = rect.x + rect.width;
+		y = rect.y;
+
+		ev_annotation_get_rgba (annot, &color);
+		color.red *= 0.45;
+		color.green *= 0.45;
+		color.blue *= 0.45;
+		if (inverted) {
+			color.red = 1. - color.red;
+			color.green = 1. - color.green;
+			color.blue = 1. - color.blue;
+		}
+
+		cairo_save (cr);
+		cairo_move_to (cr, x - size, y);
+		cairo_line_to (cr, x, y);
+		cairo_line_to (cr, x, y + size);
+		cairo_close_path (cr);
+		cairo_set_line_width (cr, 1.0);
+		cairo_set_source_rgba (cr, halo, halo, halo, 0.9);
+		cairo_stroke_preserve (cr);
+		cairo_set_source_rgb (cr, color.red, color.green, color.blue);
+		cairo_fill (cr);
+		cairo_restore (cr);
+	}
+}
+
 static void
 draw_focus (EvView       *view,
 	    cairo_t      *cr,
@@ -5207,8 +5282,10 @@ ev_view_draw (GtkWidget *widget,
 			draw_caret_cursor (view, cr);
 		if (page_ready && view->find_pages && view->highlight_find_results)
 			highlight_find_results (view, cr, i);
-		if (page_ready && EV_IS_DOCUMENT_ANNOTATIONS (view->document))
+		if (page_ready && EV_IS_DOCUMENT_ANNOTATIONS (view->document)) {
 			show_annotation_windows (view, i);
+			draw_annotation_note_marks (view, cr, i, &clip_rect);
+		}
 		if (page_ready && view->focused_element)
 			draw_focus (view, cr, i, &clip_rect);
 		if (page_ready && view->synctex_result)
