@@ -620,6 +620,13 @@ ev_view_scroll_to_page_position (EvView *view, GtkOrientation orientation)
 	if (!view->document)
 		return;
 
+	/* Keep the horizontal panning the user did on a zoomed-in page: realign
+	 * only when the destination asks for an x, or when dual mode needs to
+	 * bring the other page of the spread into view. */
+	if (orientation == GTK_ORIENTATION_HORIZONTAL &&
+	    view->pending_point.x == 0 && !is_dual_page (view, NULL))
+		return;
+
 	if ((orientation == GTK_ORIENTATION_VERTICAL && view->pending_point.y == 0) ||
 	    (orientation == GTK_ORIENTATION_HORIZONTAL && view->pending_point.x == 0)) {
 		GdkRectangle page_area;
