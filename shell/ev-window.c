@@ -6713,7 +6713,8 @@ ev_window_key_press_event (GtkWidget   *widget,
 	GtkWindow *window = GTK_WINDOW (widget);
 	EvWindowPrivate *priv = GET_PRIVATE (EV_WINDOW (widget));
 	GtkWidget *focus_widget;
-	gboolean skip_sending_accel_to_sidebar = FALSE;
+	gboolean skip_sending_accel_to_focus = FALSE;
+	gboolean is_history_accel;
 	static gpointer grand_parent_class = NULL;
 
 	if (grand_parent_class == NULL)
@@ -6729,10 +6730,16 @@ ev_window_key_press_event (GtkWidget   *widget,
 		    !GTK_IS_ENTRY (focus_widget) &&
 		    (gtk_widget_is_ancestor (focus_widget, priv->sidebar)
 		     || gtk_widget_is_ancestor (focus_widget, priv->find_sidebar)))
-			skip_sending_accel_to_sidebar = TRUE;
+			skip_sending_accel_to_focus = TRUE;
 	}
 
-	if (!skip_sending_accel_to_sidebar) {
+	/* GtkScrolledWindow binds Ctrl+Page_Up/Down to horizontal paging, which would
+	 * otherwise shadow the history navigation accels. */
+	is_history_accel = (event->state & GDK_CONTROL_MASK) &&
+		(event->keyval == GDK_KEY_Page_Up || event->keyval == GDK_KEY_KP_Page_Up ||
+		 event->keyval == GDK_KEY_Page_Down || event->keyval == GDK_KEY_KP_Page_Down);
+
+	if (!skip_sending_accel_to_focus && !is_history_accel) {
 		/* Handle focus widget key events */
 		if (gtk_window_propagate_key_event (window, event))
 			return TRUE;
@@ -6740,6 +6747,11 @@ ev_window_key_press_event (GtkWidget   *widget,
 
 	/* Handle mnemonics and accelerators */
 	if (gtk_window_activate_key (window, event))
+		return TRUE;
+
+	/* Swallow it also when the history action is disabled, otherwise chaining up
+	 * would let the scrolled window scroll horizontally instead. */
+	if (is_history_accel)
 		return TRUE;
 
         /* Chain up, invokes binding set on window */
