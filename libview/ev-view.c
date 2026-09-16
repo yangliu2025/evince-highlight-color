@@ -1982,11 +1982,13 @@ goto_xyz_dest (EvView *view, EvLinkDest *dest)
 	gint page;
 	gdouble zoom, left, top;
 	gboolean change_zoom, change_left, change_top;
+	gboolean zoom_changed;
 
 	zoom = ev_link_dest_get_zoom (dest, &change_zoom);
 	page = ev_link_dest_get_page (dest);
 
-	if (view->allow_links_change_zoom && change_zoom && zoom > 1) {
+	zoom_changed = view->allow_links_change_zoom && change_zoom && zoom > 1;
+	if (zoom_changed) {
 		ev_document_model_set_sizing_mode (view->model, EV_SIZING_FREE);
 		ev_document_model_set_scale (view->model, zoom);
 	}
@@ -1994,7 +1996,9 @@ goto_xyz_dest (EvView *view, EvLinkDest *dest)
 	left = ev_link_dest_get_left (dest, &change_left);
 	top = ev_link_dest_get_top (dest, &change_top);
 
-	doc_point.x = change_left ? left : 0;
+	/* Without a zoom change the destination's left is just the page margin,
+	 * so honouring it would only undo the user's horizontal panning. */
+	doc_point.x = (change_left && zoom_changed) ? left : 0;
 	doc_point.y = change_top ? top : 0;
 	view->pending_point = doc_point;
 
