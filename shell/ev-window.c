@@ -6715,11 +6715,20 @@ ev_window_key_press_event (GtkWidget   *widget,
 	EvWindowPrivate *priv = GET_PRIVATE (EV_WINDOW (widget));
 	GtkWidget *focus_widget;
 	gboolean skip_sending_accel_to_focus = FALSE;
-	gboolean is_history_accel;
 	static gpointer grand_parent_class = NULL;
 
 	if (grand_parent_class == NULL)
 		grand_parent_class = g_type_class_peek_parent (ev_window_parent_class);
+
+	/* Keypad arrows are deliberately inert everywhere in the window. */
+	if (event->keyval >= GDK_KEY_KP_Left && event->keyval <= GDK_KEY_KP_Down)
+		return TRUE;
+
+	/* Deliberately inert; GtkScrolledWindow would page horizontally otherwise. */
+	if ((event->state & GDK_CONTROL_MASK) &&
+	    (event->keyval == GDK_KEY_Page_Up || event->keyval == GDK_KEY_KP_Page_Up ||
+	     event->keyval == GDK_KEY_Page_Down || event->keyval == GDK_KEY_KP_Page_Down))
+		return TRUE;
 
 	/* Don't send Ctrl and Alt accels to sidebar, as they may be handled by
 	 * GtkTreeView or other sidebar focused widgets, while we want them to reach
@@ -6734,13 +6743,7 @@ ev_window_key_press_event (GtkWidget   *widget,
 			skip_sending_accel_to_focus = TRUE;
 	}
 
-	/* GtkScrolledWindow binds Ctrl+Page_Up/Down to horizontal paging, which would
-	 * otherwise shadow the history navigation accels. */
-	is_history_accel = (event->state & GDK_CONTROL_MASK) &&
-		(event->keyval == GDK_KEY_Page_Up || event->keyval == GDK_KEY_KP_Page_Up ||
-		 event->keyval == GDK_KEY_Page_Down || event->keyval == GDK_KEY_KP_Page_Down);
-
-	if (!skip_sending_accel_to_focus && !is_history_accel) {
+	if (!skip_sending_accel_to_focus) {
 		/* Handle focus widget key events */
 		if (gtk_window_propagate_key_event (window, event))
 			return TRUE;
@@ -6748,11 +6751,6 @@ ev_window_key_press_event (GtkWidget   *widget,
 
 	/* Handle mnemonics and accelerators */
 	if (gtk_window_activate_key (window, event))
-		return TRUE;
-
-	/* Swallow it also when the history action is disabled, otherwise chaining up
-	 * would let the scrolled window scroll horizontally instead. */
-	if (is_history_accel)
 		return TRUE;
 
         /* Chain up, invokes binding set on window */
