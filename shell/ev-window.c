@@ -5511,6 +5511,7 @@ ev_window_cmd_escape (GSimpleAction *action,
 		 * toolbar button. */
 		ev_window_cancel_add_annot (window);
 		ev_annotations_toolbar_add_annot_finished (EV_ANNOTATIONS_TOOLBAR (priv->annots_toolbar));
+		ev_view_clear_selection (EV_VIEW (priv->view));
 		gtk_widget_grab_focus (priv->view);
 	}
 }

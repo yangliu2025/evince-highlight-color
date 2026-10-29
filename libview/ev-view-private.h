@@ -57,12 +57,24 @@ typedef struct {
 	guint timeout_id;
 } AutoScrollInfo;
 
+/* A text selection end placed between the visible glyphs of a page */
+typedef struct {
+	gint    page;
+	gint    glyph;   /* number of visible glyphs of @page before this end */
+	gdouble line_x;  /* doc x kept while moving across lines */
+} SelectionEndpoint;
+
 /* Information for handling selection */
 typedef struct {
 	gboolean in_drag;
 	GdkPoint start;
 	GList *selections;
 	EvSelectionStyle style;
+
+	/* Arrow keys move the tail, Shift+arrow keys the head; either may come first */
+	gboolean          has_endpoints;
+	SelectionEndpoint head;
+	SelectionEndpoint tail;
 } SelectionInfo;
 
 /* Information for handling images DND */

@@ -17,7 +17,7 @@ set -euo pipefail
 BASE_REF="upstream/46.3.1"
 PATCH_NAME="highlight-annotation-colors.patch"
 PATCH_PATHS=(backend libview shell)
-NEW_SYMBOLS=(ev_view_add_annotation ev_view_get_selected_annotation ev_view_set_annotation_color)
+NEW_SYMBOLS=(ev_view_add_annotation ev_view_clear_selection ev_view_get_selected_annotation ev_view_set_annotation_color)
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 WORKDIR="${1:-$PWD/evince-deb-build}"

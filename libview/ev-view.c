@@ -327,6 +327,10 @@ static void       extend_selection                           (EvView            
 							      GdkPoint           *start,
 							      GdkPoint           *stop);
 static void       clear_selection                            (EvView             *view);
+static gboolean   ev_view_move_selection_endpoint            (EvView             *view,
+							      GtkMovementStep     step,
+							      gint                count,
+							      gboolean            move_head);
 static void       selection_free                             (EvViewSelection    *selection);
 static char*      get_selected_text                          (EvView             *ev_view);
 static void       ev_view_primary_get_cb                     (GtkClipboard       *clipboard,
@@ -7257,6 +7261,11 @@ ev_view_move_cursor (EvView         *view,
 	gboolean        clear_selections = FALSE;
 	const gboolean  forward = count >= 0;
 
+	/* Caret navigation keeps the usual editor meaning of Shift+arrows */
+	if (!view->caret_enabled && view->selection_info.selections &&
+	    (step == GTK_MOVEMENT_VISUAL_POSITIONS || step == GTK_MOVEMENT_DISPLAY_LINES))
+		return ev_view_move_selection_endpoint (view, step, count, extend_selections);
+
 	if (!view->caret_enabled || view->rotation != 0)
 		return FALSE;
 
@@ -9179,6 +9188,7 @@ ev_view_document_changed_cb (EvDocumentModel *model,
                 }
 
 		view->document = document ? g_object_ref (document) : NULL;
+		view->selection_info.has_endpoints = FALSE;
 		view->find_page = -1;
 		view->find_result = 0;
 
@@ -10292,6 +10302,7 @@ merge_selection_region (EvView *view,
 	old_list = ev_pixbuf_cache_get_selection_list (view->pixbuf_cache);
 	g_list_free_full (view->selection_info.selections, (GDestroyNotify)selection_free);
 	view->selection_info.selections = new_list;
+	view->selection_info.has_endpoints = FALSE;
 	ev_pixbuf_cache_set_selection_list (view->pixbuf_cache, new_list);
 	g_signal_emit (view, signals[SIGNAL_SELECTION_CHANGED], 0, NULL);
 
@@ -10471,6 +10482,21 @@ ev_view_get_has_selection (EvView *view)
 	return view->selection_info.selections != NULL;
 }
 
+/**
+ * ev_view_clear_selection:
+ * @view: an #EvView
+ *
+ * Deselects the selected text, if any.
+ */
+void
+ev_view_clear_selection (EvView *view)
+{
+	g_return_if_fail (EV_IS_VIEW (view));
+
+	if (view->selection_info.selections)
+		clear_selection (view);
+}
+
 void
 _ev_view_clear_selection (EvView *view)
 {
@@ -10483,6 +10509,546 @@ _ev_view_set_selection (EvView   *view,
 			GdkPoint *end_point)
 {
 	compute_selections (view, EV_SELECTION_STYLE_GLYPH, start_point, end_point);
+}
+
+/*** Moving the selection ends with the keyboard ***/
+
+/* Visible glyphs of a page in reading order. The '\n' poppler puts between
+ * lines has a zero-height box and only starts a new line; zero-width boxes
+ * never show as selected and are skipped. */
+typedef struct {
+	EvRectangle *areas;
+	guint       *index;
+	guint       *line;
+	gint         n;
+	gboolean     missing;  /* text layout not loaded yet */
+} PageGlyphs;
+
+/* Evince rounds the region again at this scale; keep that well below poppler's 1pt grid */
+#define SELECTION_REGION_SCALE 4.0
+
+static void
+page_glyphs_free (PageGlyphs *glyphs)
+{
+	g_free (glyphs->index);
+	g_free (glyphs->line);
+	g_free (glyphs);
+}
+
+static PageGlyphs *
+page_glyphs_new (EvView *view,
+		 gint    page)
+{
+	PageGlyphs *glyphs = g_new0 (PageGlyphs, 1);
+	guint       n_areas = 0;
+	guint       i, line = 0;
+	gboolean    line_ended = FALSE;
+
+	glyphs->missing = !ev_page_cache_is_page_cached (view->page_cache, page);
+	if (glyphs->missing)
+		return glyphs;
+
+	ev_page_cache_get_text_layout (view->page_cache, page, &glyphs->areas, &n_areas);
+	if (!glyphs->areas)
+		return glyphs;
+
+	glyphs->index = g_new (guint, n_areas);
+	glyphs->line = g_new (guint, n_areas);
+	for (i = 0; i < n_areas; i++) {
+		EvRectangle *rect = glyphs->areas + i;
+
+		if (rect->y2 <= rect->y1) {
+			line_ended = glyphs->n > 0;
+			continue;
+		}
+		if (rect->x2 <= rect->x1)
+			continue;
+		if (line_ended) {
+			line++;
+			line_ended = FALSE;
+		}
+		glyphs->index[glyphs->n] = i;
+		glyphs->line[glyphs->n] = line;
+		glyphs->n++;
+	}
+
+	return glyphs;
+}
+
+static gboolean
+page_glyphs_is_missing (gpointer key,
+			gpointer value,
+			gpointer user_data)
+{
+	return ((PageGlyphs *) value)->missing;
+}
+
+static PageGlyphs *
+get_page_glyphs (EvView     *view,
+		 GHashTable *cache,
+		 gint        page)
+{
+	PageGlyphs *glyphs = g_hash_table_lookup (cache, GINT_TO_POINTER (page));
+
+	if (!glyphs) {
+		glyphs = page_glyphs_new (view, page);
+		g_hash_table_insert (cache, GINT_TO_POINTER (page), glyphs);
+	}
+
+	return glyphs;
+}
+
+static inline EvRectangle *
+glyph_rect (PageGlyphs *glyphs,
+	    gint        glyph)
+{
+	return glyphs->areas + glyphs->index[glyph];
+}
+
+/* The closest page before (@dir < 0) or after @page that has glyphs, or -1;
+ * gives up at a page whose text isn't loaded. */
+static gint
+find_text_page (EvView     *view,
+		GHashTable *cache,
+		gint        page,
+		gint        dir)
+{
+	gint n_pages = ev_document_get_n_pages (view->document);
+
+	for (page += dir; page >= 0 && page < n_pages; page += dir) {
+		PageGlyphs *glyphs = get_page_glyphs (view, cache, page);
+
+		if (glyphs->missing)
+			return -1;
+		if (glyphs->n > 0)
+			return page;
+	}
+
+	return -1;
+}
+
+static gboolean
+page_is_reachable (EvView *view,
+		   gint    page)
+{
+	return view->continuous || (page >= view->start_page && page <= view->end_page);
+}
+
+static gint
+endpoint_cmp (const SelectionEndpoint *a,
+	      const SelectionEndpoint *b)
+{
+	if (a->page != b->page)
+		return a->page < b->page ? -1 : 1;
+
+	return a->glyph < b->glyph ? -1 : (a->glyph > b->glyph ? 1 : 0);
+}
+
+/* The gap after the last glyph of a page is the one before the first glyph of
+ * the next page with text; store it as the latter so equal ends compare equal. */
+static void
+endpoint_normalize (EvView            *view,
+		    GHashTable        *cache,
+		    SelectionEndpoint *end)
+{
+	gint page;
+
+	if (end->glyph < get_page_glyphs (view, cache, end->page)->n)
+		return;
+
+	page = find_text_page (view, cache, end->page, 1);
+	if (page != -1) {
+		end->page = page;
+		end->glyph = 0;
+	}
+}
+
+/* The glyph an end sits against: the first selected one when the end leads,
+ * the last selected one when it trails. */
+static gboolean
+endpoint_get_anchor (EvView                  *view,
+		     GHashTable              *cache,
+		     const SelectionEndpoint *end,
+		     gboolean                 leading,
+		     gint                    *page,
+		     gint                    *glyph)
+{
+	if (leading) {
+		*page = end->page;
+		*glyph = end->glyph;
+
+		return end->glyph < get_page_glyphs (view, cache, end->page)->n;
+	}
+
+	if (end->glyph > 0) {
+		*page = end->page;
+		*glyph = end->glyph - 1;
+
+		return TRUE;
+	}
+
+	*page = find_text_page (view, cache, end->page, -1);
+	if (*page == -1)
+		return FALSE;
+	*glyph = get_page_glyphs (view, cache, *page)->n - 1;
+
+	return TRUE;
+}
+
+static void
+endpoint_update_line_x (EvView            *view,
+			GHashTable        *cache,
+			SelectionEndpoint *end,
+			gboolean           leading)
+{
+	EvRectangle *rect;
+	gint         page, glyph;
+
+	if (!endpoint_get_anchor (view, cache, end, leading, &page, &glyph))
+		return;
+
+	rect = glyph_rect (get_page_glyphs (view, cache, page), glyph);
+	end->line_x = leading ? rect->x1 : rect->x2;
+}
+
+/* Moves @end over one glyph, reporting the page of that glyph in @glyph_page */
+static gboolean
+endpoint_step (EvView            *view,
+	       GHashTable        *cache,
+	       SelectionEndpoint *end,
+	       gboolean           forward,
+	       gint              *glyph_page)
+{
+	if (forward) {
+		if (end->glyph >= get_page_glyphs (view, cache, end->page)->n)
+			return FALSE;
+
+		*glyph_page = end->page;
+		end->glyph++;
+		endpoint_normalize (view, cache, end);
+	} else if (end->glyph > 0) {
+		end->glyph--;
+		*glyph_page = end->page;
+	} else {
+		gint page = find_text_page (view, cache, end->page, -1);
+
+		if (page == -1)
+			return FALSE;
+
+		end->page = page;
+		end->glyph = get_page_glyphs (view, cache, page)->n - 1;
+		*glyph_page = page;
+	}
+
+	return TRUE;
+}
+
+static gboolean
+move_endpoint_by_glyph (EvView                  *view,
+			GHashTable              *cache,
+			SelectionEndpoint       *end,
+			const SelectionEndpoint *other,
+			gboolean                 forward)
+{
+	SelectionEndpoint moved = *end;
+	gint              page;
+
+	if (!endpoint_step (view, cache, &moved, forward, &page) || !page_is_reachable (view, page))
+		return FALSE;
+
+	/* Landing on the other end would empty the selection: hop one more glyph, flipping it */
+	if (endpoint_cmp (&moved, other) == 0 &&
+	    (!endpoint_step (view, cache, &moved, forward, &page) || !page_is_reachable (view, page)))
+		return FALSE;
+
+	*end = moved;
+	endpoint_update_line_x (view, cache, end, endpoint_cmp (end, other) < 0);
+
+	return TRUE;
+}
+
+static void
+get_line_range (PageGlyphs *glyphs,
+		gint        glyph,
+		gint       *first,
+		gint       *last)
+{
+	*first = *last = glyph;
+	while (*first > 0 && glyphs->line[*first - 1] == glyphs->line[glyph])
+		(*first)--;
+	while (*last + 1 < glyphs->n && glyphs->line[*last + 1] == glyphs->line[glyph])
+		(*last)++;
+}
+
+static gboolean
+move_endpoint_by_line (EvView                  *view,
+		       GHashTable              *cache,
+		       SelectionEndpoint       *end,
+		       const SelectionEndpoint *other,
+		       gboolean                 forward)
+{
+	SelectionEndpoint line_start, line_end;
+	PageGlyphs       *glyphs;
+	gint              page, glyph, first, last, target, i;
+
+	if (!endpoint_get_anchor (view, cache, end, endpoint_cmp (end, other) < 0, &page, &glyph))
+		return FALSE;
+
+	glyphs = get_page_glyphs (view, cache, page);
+	get_line_range (glyphs, glyph, &first, &last);
+	if (!forward && first > 0) {
+		glyph = first - 1;
+	} else if (forward && last + 1 < glyphs->n) {
+		glyph = last + 1;
+	} else {
+		page = find_text_page (view, cache, page, forward ? 1 : -1);
+		if (page == -1)
+			return FALSE;
+		glyphs = get_page_glyphs (view, cache, page);
+		glyph = forward ? 0 : glyphs->n - 1;
+	}
+
+	if (!page_is_reachable (view, page))
+		return FALSE;
+
+	get_line_range (glyphs, glyph, &first, &last);
+	target = first;
+	for (i = first; i <= last; i++) {
+		EvRectangle *rect = glyph_rect (glyphs, i);
+
+		if ((rect->x1 + rect->x2) / 2 < end->line_x)
+			target++;
+	}
+
+	/* Off the target line's glyphs the end would belong to a neighbouring line,
+	 * and the next Up/Down would come back to this one. */
+	line_start.page = line_end.page = page;
+	line_start.glyph = first;
+	line_end.glyph = last + 1;
+	endpoint_normalize (view, cache, &line_end);
+	if (endpoint_cmp (other, &line_start) <= 0)
+		target = MAX (target, first + 1);
+	else if (endpoint_cmp (other, &line_end) >= 0)
+		target = MIN (target, last);
+	else if (other->glyph == target)
+		target += forward ? 1 : -1;
+
+	end->page = page;
+	end->glyph = target;
+	endpoint_normalize (view, cache, end);
+
+	return TRUE;
+}
+
+static gboolean
+find_selected_glyph (EvView            *view,
+		     GHashTable        *cache,
+		     EvViewSelection   *selection,
+		     gboolean           first,
+		     SelectionEndpoint *end)
+{
+	PageGlyphs      *glyphs;
+	EvPage          *ev_page;
+	EvRenderContext *rc;
+	cairo_region_t  *region;
+	gint             n_rects, i, k;
+	gboolean         found = FALSE;
+
+	if (selection->page >= ev_document_get_n_pages (view->document))
+		return FALSE;
+
+	glyphs = get_page_glyphs (view, cache, selection->page);
+	if (glyphs->n == 0)
+		return FALSE;
+
+	ev_document_doc_mutex_lock ();
+	ev_page = ev_document_get_page (view->document, selection->page);
+	rc = ev_render_context_new (ev_page, 0, SELECTION_REGION_SCALE);
+	region = ev_selection_get_selection_region (EV_SELECTION (view->document), rc,
+						    selection->style, &selection->rect);
+	g_object_unref (rc);
+	g_object_unref (ev_page);
+	ev_document_doc_mutex_unlock ();
+
+	if (!region)
+		return FALSE;
+
+	/* Mouse selections can also be words or lines, so ask which glyphs got
+	 * highlighted instead of reading the ends off selection->rect. */
+	n_rects = cairo_region_num_rectangles (region);
+	for (k = 0; k < glyphs->n && !found; k++) {
+		gint         glyph = first ? k : glyphs->n - 1 - k;
+		EvRectangle *rect = glyph_rect (glyphs, glyph);
+		gdouble      x = (rect->x1 + rect->x2) / 2 * SELECTION_REGION_SCALE;
+		gdouble      y = (rect->y1 + rect->y2) / 2 * SELECTION_REGION_SCALE;
+
+		for (i = 0; i < n_rects && !found; i++) {
+			cairo_rectangle_int_t r;
+
+			cairo_region_get_rectangle (region, i, &r);
+			found = x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height;
+		}
+
+		if (found) {
+			end->page = selection->page;
+			end->glyph = glyph;
+		}
+	}
+	cairo_region_destroy (region);
+
+	return found;
+}
+
+/* A fresh selection starts with its head at the front and its tail at the back */
+static gboolean
+selection_endpoints_init (EvView            *view,
+			  GHashTable        *cache,
+			  SelectionEndpoint *head,
+			  SelectionEndpoint *tail)
+{
+	SelectionEndpoint front, back;
+	GList            *l;
+
+	for (l = view->selection_info.selections; l; l = l->next) {
+		if (find_selected_glyph (view, cache, l->data, TRUE, &front))
+			break;
+	}
+	if (!l)
+		return FALSE;
+
+	for (l = g_list_last (view->selection_info.selections); l; l = l->prev) {
+		if (find_selected_glyph (view, cache, l->data, FALSE, &back))
+			break;
+	}
+	if (!l)
+		return FALSE;
+
+	back.glyph++;
+	endpoint_normalize (view, cache, &back);
+	if (endpoint_cmp (&front, &back) >= 0)
+		return FALSE;
+
+	endpoint_update_line_x (view, cache, &front, TRUE);
+	endpoint_update_line_x (view, cache, &back, FALSE);
+	*head = front;
+	*tail = back;
+
+	return TRUE;
+}
+
+static GList *
+selection_from_anchors (EvView     *view,
+			GHashTable *cache,
+			gint        first_page,
+			gint        first_glyph,
+			gint        last_page,
+			gint        last_glyph)
+{
+	GList *list = NULL;
+	gint   page;
+
+	for (page = first_page; page <= last_page; page++) {
+		EvViewSelection *selection = g_slice_new0 (EvViewSelection);
+
+		selection->page = page;
+		selection->style = EV_SELECTION_STYLE_GLYPH;
+
+		if (page != first_page && page != last_page) {
+			get_doc_page_size (view, page, &selection->rect.x2, &selection->rect.y2);
+		} else {
+			PageGlyphs  *glyphs = get_page_glyphs (view, cache, page);
+			EvRectangle *from = glyph_rect (glyphs, page == first_page ? first_glyph : 0);
+			EvRectangle *to = glyph_rect (glyphs, page == last_page ? last_glyph : glyphs->n - 1);
+
+			selection->rect.x1 = from->x1;
+			selection->rect.y1 = (from->y1 + from->y2) / 2;
+			selection->rect.x2 = to->x2;
+			selection->rect.y2 = (to->y1 + to->y2) / 2;
+		}
+
+		list = g_list_prepend (list, selection);
+	}
+
+	return g_list_reverse (list);
+}
+
+static gboolean
+ev_view_move_selection_endpoint (EvView         *view,
+				 GtkMovementStep step,
+				 gint            count,
+				 gboolean        move_head)
+{
+	GHashTable        *cache;
+	SelectionEndpoint  head, tail;
+	SelectionEndpoint *end, *other;
+	GList             *selections;
+	EvRectangle        doc_rect;
+	GdkRectangle       view_rect;
+	gboolean           moved = TRUE;
+	gboolean           leading = FALSE;
+	gboolean           incomplete;
+	gint               first_page, first_glyph, last_page, last_glyph, page;
+
+	if (view->rotation != 0 || !EV_IS_SELECTION (view->document))
+		return FALSE;
+
+	cache = g_hash_table_new_full (NULL, NULL, NULL, (GDestroyNotify) page_glyphs_free);
+	if (view->selection_info.has_endpoints) {
+		head = view->selection_info.head;
+		tail = view->selection_info.tail;
+	} else if (!selection_endpoints_init (view, cache, &head, &tail)) {
+		if (!g_hash_table_find (cache, page_glyphs_is_missing, NULL)) {
+			/* No text in the selection (e.g. only an image): the arrows keep scrolling */
+			g_hash_table_destroy (cache);
+			return FALSE;
+		}
+		moved = FALSE;
+	}
+
+	view->key_binding_handled = TRUE;
+	end = move_head ? &head : &tail;
+	other = move_head ? &tail : &head;
+
+	for (; count != 0 && moved; count += count > 0 ? -1 : 1) {
+		if (step == GTK_MOVEMENT_DISPLAY_LINES)
+			moved = move_endpoint_by_line (view, cache, end, other, count > 0);
+		else
+			moved = move_endpoint_by_glyph (view, cache, end, other, count > 0);
+	}
+
+	if (moved) {
+		leading = endpoint_cmp (end, other) < 0;
+		moved = endpoint_get_anchor (view, cache, leading ? end : other, TRUE, &first_page, &first_glyph) &&
+			endpoint_get_anchor (view, cache, leading ? other : end, FALSE, &last_page, &last_glyph);
+	}
+
+	/* Pages never scrolled near (e.g. after Select All) have no text layout yet: ignore the key */
+	incomplete = g_hash_table_find (cache, page_glyphs_is_missing, NULL) != NULL;
+	if (incomplete || !moved) {
+		g_hash_table_destroy (cache);
+		/* Single page mode stops quietly at the pages on screen */
+		if (!incomplete && view->continuous)
+			gtk_widget_error_bell (GTK_WIDGET (view));
+		return TRUE;
+	}
+
+	selections = selection_from_anchors (view, cache, first_page, first_glyph, last_page, last_glyph);
+	page = leading ? first_page : last_page;
+	doc_rect = *glyph_rect (get_page_glyphs (view, cache, page), leading ? first_glyph : last_glyph);
+	g_hash_table_destroy (cache);
+
+	_ev_view_transform_doc_rect_to_view_rect (view, page, &doc_rect, &view_rect);
+	_ev_view_ensure_rectangle_is_visible (view, &view_rect);
+
+	merge_selection_region (view, selections);
+	view->selection_info.head = head;
+	view->selection_info.tail = tail;
+	view->selection_info.has_endpoints = TRUE;
+
+	g_clear_object (&view->link_selected);
+	ev_view_update_primary_selection (view);
+
+	return TRUE;
 }
 
 static char *

@@ -79,6 +79,8 @@ void		ev_view_select_all	  (EvView         *view);
 EV_PUBLIC
 gboolean        ev_view_get_has_selection (EvView         *view);
 EV_PUBLIC
+void            ev_view_clear_selection   (EvView         *view);
+EV_PUBLIC
 char *   ev_view_get_selected_text (EvView  *view);
 
 /* Page size */
