@@ -336,6 +336,7 @@ sanitized_substring (const gchar  *text,
 static gchar *
 get_surrounding_text_markup (const gchar  *text,
                              const gchar  *find_text,
+                             gint          match_length,
                              gboolean      case_sensitive,
                              PangoLogAttr *log_attrs,
                              gint          log_attrs_length,
@@ -357,17 +358,24 @@ get_surrounding_text_markup (const gchar  *text,
         prec = sanitized_substring (text, iter, offset);
 
         iter = offset;
-        offset += g_utf8_strlen (find_text, -1);
 
-        if (has_nextline || g_utf8_offset_to_pointer (text, offset-1)[0] == '\n') {
-                if (has_nextline) {
-                        offset += 1; /* for newline */
-                        if (hyphen_was_ignored)
-                                offset += 1; /* for hyphen */
-                }
+        if (match_length >= 0) {
+                /* A regex match: its length is known and it may span any number of lines */
+                offset += match_length;
                 match = sanitized_substring (text, iter, offset);
-        } else if (!case_sensitive)
-                match = g_utf8_substring (text, iter, offset);
+        } else {
+                offset += g_utf8_strlen (find_text, -1);
+
+                if (has_nextline || g_utf8_offset_to_pointer (text, offset-1)[0] == '\n') {
+                        if (has_nextline) {
+                                offset += 1; /* for newline */
+                                if (hyphen_was_ignored)
+                                        offset += 1; /* for hyphen */
+                        }
+                        match = sanitized_substring (text, iter, offset);
+                } else if (!case_sensitive)
+                        match = g_utf8_substring (text, iter, offset);
+        }
 
         iter = MIN (log_attrs_length, offset + 1);
         max_chars = MIN (log_attrs_length - 1, iter + 100);
@@ -448,6 +456,49 @@ get_match_offset (EvRectangle *areas,
         return -1;
 }
 
+/* A regex match has no fixed length: it runs on while its characters fall
+ * inside its rectangles, skipping the newlines between its lines. */
+static gint
+get_match_length (const gchar *text,
+                  EvRectangle *areas,
+                  guint        n_areas,
+                  GList       *match_link,
+                  gint         offset)
+{
+        const gchar *p = g_utf8_offset_to_pointer (text, offset);
+        gint         length = 0;
+        guint        i;
+
+        for (i = offset; i < n_areas && *p; i++, p = g_utf8_next_char (p)) {
+                EvRectangle *area = areas + i;
+                gdouble      x = (area->x1 + area->x2) / 2;
+                gdouble      y = (area->y1 + area->y2) / 2;
+                gboolean     inside = FALSE;
+                GList       *l;
+
+                if (*p == '\n')
+                        continue;
+
+                for (l = match_link; l; l = g_list_next (l)) {
+                        EvFindRectangle *rect = (EvFindRectangle *)l->data;
+
+                        if (x >= rect->x1 && x <= rect->x2 &&
+                            y >= rect->y1 && y <= rect->y2) {
+                                inside = TRUE;
+                                break;
+                        }
+                        if (!rect->next_line)
+                                break;
+                }
+                if (!inside)
+                        break;
+
+                length = i - offset + 1;
+        }
+
+        return length;
+}
+
 static gboolean
 process_matches_idle (EvFindSidebar *sidebar)
 {
@@ -455,6 +506,7 @@ process_matches_idle (EvFindSidebar *sidebar)
         GtkTreeModel         *model;
         gint                  current_page;
         EvDocument           *document;
+        gboolean              is_regex;
 
         priv->process_matches_idle_id = 0;
 
@@ -463,6 +515,8 @@ process_matches_idle (EvFindSidebar *sidebar)
                         g_clear_object (&priv->job);
 		return G_SOURCE_REMOVE;
         }
+
+        is_regex = (ev_job_find_get_options (priv->job) & EV_FIND_REGEX) != 0;
 
         document = EV_JOB (priv->job)->document;
         model = gtk_tree_view_get_model (GTK_TREE_VIEW (priv->tree_view));
@@ -518,11 +572,12 @@ process_matches_idle (EvFindSidebar *sidebar)
                                  * poppler-glib poppler_page_get_text_layout_for_area() function) so in that
                                  * case we just show matched text because we cannot retrieve surrounding text.
                                  * Issue #1943 and related #1545 */
-                                markup = g_strdup_printf ("<b>%s</b>", priv->job->text);
+                                markup = g_markup_printf_escaped ("<b>%s</b>", priv->job->text);
                         } else {
                                 offset = new_offset;
                                 markup = get_surrounding_text_markup (page_text,
                                                                       priv->job->text,
+                                                                      is_regex ? get_match_length (page_text, areas, n_areas, l, offset) : -1,
                                                                       priv->job->case_sensitive,
                                                                       text_log_attrs,
                                                                       text_log_attrs_length,

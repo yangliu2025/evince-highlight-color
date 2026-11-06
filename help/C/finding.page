@@ -52,9 +52,20 @@
   </steps>
 
   <note style="tip">
-    <p>To filter words by case or completion, you can right click on the search
-    box and select <gui>Case Sensitive</gui> or <gui>Whole Words
-    Only</gui>.</p>
+    <p>The buttons next to the search box refine the search, like in many code
+    editors:</p>
+    <list>
+      <item><p><gui>Aa</gui> (<keyseq><key>Alt</key><key>C</key></keyseq>)
+      only finds text with the same upper and lower case letters.</p></item>
+      <item><p><gui>ab</gui> (<keyseq><key>Alt</key><key>W</key></keyseq>)
+      skips results that start or end inside a longer word.</p></item>
+      <item><p><gui>.*</gui> (<keyseq><key>Alt</key><key>R</key></keyseq>)
+      treats the search text as a Perl-compatible regular expression, for
+      example <input>E\d{4}</input>. A result can span several lines;
+      <input>^</input> and <input>$</input> match at the start and end of each
+      line. If the expression is not valid, the search box turns red and its
+      tooltip explains the error.</p></item>
+    </list>
   </note>
 
   <p>If the word or phrase that you searched for is not found in the document,

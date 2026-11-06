@@ -7719,16 +7719,18 @@ highlight_find_results (EvView *view,
 		_ev_view_transform_doc_rect_to_view_rect (view, page, ev_rect, &view_rectangle);
 		draw_rubberband (view, cr, &view_rectangle, active);
 
-		if (active && find_rect->next_line) {
-			/* Draw now next result (which is second part of multi-line match) */
-			i++;
-			find_rect = ev_view_find_get_result (view, page, i);
-			ev_rect->x1 = find_rect->x1;
-			ev_rect->x2 = find_rect->x2;
-			ev_rect->y1 = find_rect->y1;
-			ev_rect->y2 = find_rect->y2;
-			_ev_view_transform_doc_rect_to_view_rect (view, page, ev_rect, &view_rectangle);
-			draw_rubberband (view, cr, &view_rectangle, TRUE);
+		if (active) {
+			/* Draw the remaining parts of a multi-line match as active too */
+			while (find_rect->next_line && i + 1 < n_results) {
+				i++;
+				find_rect = ev_view_find_get_result (view, page, i);
+				ev_rect->x1 = find_rect->x1;
+				ev_rect->x2 = find_rect->x2;
+				ev_rect->y1 = find_rect->y1;
+				ev_rect->y2 = find_rect->y2;
+				_ev_view_transform_doc_rect_to_view_rect (view, page, ev_rect, &view_rectangle);
+				draw_rubberband (view, cr, &view_rectangle, TRUE);
+			}
 		}
         }
 
@@ -9870,6 +9872,24 @@ ev_view_find_is_next_line (EvView *view, gint page, gint result)
 	return elem && ((EvFindRectangle *) elem->data)->next_line;
 }
 
+/* A match spanning several lines is stored as consecutive rectangles, all but
+ * the last flagged next_line. These map any of them to the first or last one. */
+static gint
+ev_view_find_get_match_start (EvView *view, gint page, gint result)
+{
+	while (result > 0 && ev_view_find_is_next_line (view, page, result - 1))
+		result--;
+	return result;
+}
+
+static gint
+ev_view_find_get_match_end (EvView *view, gint page, gint result)
+{
+	while (ev_view_find_is_next_line (view, page, result))
+		result++;
+	return result;
+}
+
 static void
 jump_to_find_result (EvView *view)
 {
@@ -9881,23 +9901,23 @@ jump_to_find_result (EvView *view)
 	rect = ev_rectangle_new ();
 
 	if (n_results > 0 && view->find_result < n_results) {
-		EvFindRectangle *find_rect, *rect_next;
+		EvFindRectangle *find_rect, *segment;
 		GdkRectangle view_rect;
+		gint i;
 
-		rect_next = NULL;
 		find_rect = ev_view_find_get_result (view, page, view->find_result);
-		if (find_rect->next_line) {
-			/* For an across-lines match, make sure both rectangles are visible */
-			rect_next = ev_view_find_get_result (view, page, view->find_result + 1);
-			rect->x1 = MIN (find_rect->x1, rect_next->x1);
-			rect->y1 = MIN (find_rect->y1, rect_next->y1);
-			rect->x2 = MAX (find_rect->x2, rect_next->x2);
-			rect->y2 = MAX (find_rect->y2, rect_next->y2);
-		} else {
-			rect->x1 = find_rect->x1;
-			rect->y1 = find_rect->y1;
-			rect->x2 = find_rect->x2;
-			rect->y2 = find_rect->y2;
+		rect->x1 = find_rect->x1;
+		rect->y1 = find_rect->y1;
+		rect->x2 = find_rect->x2;
+		rect->y2 = find_rect->y2;
+		/* For an across-lines match, make sure all its rectangles are visible */
+		for (i = view->find_result, segment = find_rect;
+		     segment->next_line && i + 1 < n_results;) {
+			segment = ev_view_find_get_result (view, page, ++i);
+			rect->x1 = MIN (rect->x1, segment->x1);
+			rect->y1 = MIN (rect->y1, segment->y1);
+			rect->x2 = MAX (rect->x2, segment->x2);
+			rect->y2 = MAX (rect->y2, segment->y2);
 		}
 		_ev_view_transform_doc_rect_to_view_rect (view, page, rect, &view_rect);
 		_ev_view_ensure_rectangle_is_visible (view, &view_rect);
@@ -10033,8 +10053,7 @@ ev_view_find_next (EvView *view)
 	gint n_results;
 
 	n_results = ev_view_find_get_n_results (view, view->find_page);
-	view->find_result += ev_view_find_is_next_line (view, view->find_page, view->find_result)
-	                     ? 2 : 1;
+	view->find_result = ev_view_find_get_match_end (view, view->find_page, view->find_result) + 1;
 
 	if (view->find_result >= n_results) {
 		view->find_result = 0;
@@ -10050,17 +10069,15 @@ ev_view_find_next (EvView *view)
 void
 ev_view_find_previous (EvView *view)
 {
-	view->find_result -= ev_view_find_is_next_line (view, view->find_page, view->find_result - 2)
-	                     ? 2 : 1;
+	view->find_result--;
 
 	if (view->find_result < 0) {
 		jump_to_find_page (view, EV_VIEW_FIND_PREV, -1);
 		view->find_result = MAX (0, ev_view_find_get_n_results (view, view->find_page) - 1);
-		if (view->find_result && ev_view_find_is_next_line (view, view->find_page, view->find_result))
-			view->find_result--; /* set to last "non-nextline" result */
 	} else if (view->find_page != view->current_page) {
 		jump_to_find_page (view, EV_VIEW_FIND_PREV, 0);
 	}
+	view->find_result = ev_view_find_get_match_start (view, view->find_page, view->find_result);
 
 	jump_to_find_result (view);
 	gtk_widget_queue_draw (GTK_WIDGET (view));

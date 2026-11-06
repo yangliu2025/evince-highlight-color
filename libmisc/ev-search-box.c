@@ -31,6 +31,7 @@ enum {
 
         NEXT,
         PREVIOUS,
+        TOGGLE_OPTION,
 
         LAST_SIGNAL
 };
@@ -50,6 +51,9 @@ typedef struct {
         EvFindOptions    supported_options;
 
         GtkWidget       *entry;
+        GtkWidget       *case_sensitive_button;
+        GtkWidget       *whole_words_only_button;
+        GtkWidget       *regex_button;
         GtkWidget       *next_button;
         GtkWidget       *prev_button;
 
@@ -106,11 +110,6 @@ find_job_finished_cb (EvJobFind   *job,
                 gtk_entry_set_icon_from_icon_name (GTK_ENTRY (priv->entry),
                                                    GTK_ENTRY_ICON_PRIMARY,
                                                    "face-uncertain-symbolic");
-                if (priv->supported_options != EV_FIND_DEFAULT) {
-                        gtk_entry_set_icon_tooltip_text (GTK_ENTRY (priv->entry),
-                                                         GTK_ENTRY_ICON_PRIMARY,
-                                                         _("Not found, click to change search options"));
-                }
         }
 }
 
@@ -162,12 +161,39 @@ find_job_updated_cb (EvJobFind   *job,
         }
 }
 
+/* The backend would just find nothing for a broken pattern; say why instead. */
+static gboolean
+ev_search_box_check_regex (EvSearchBox *box,
+                           const gchar *pattern)
+{
+        EvSearchBoxPrivate *priv = GET_PRIVATE (box);
+        GRegex             *regex;
+        GError             *error = NULL;
+
+        regex = g_regex_new (pattern, 0, 0, &error);
+        if (regex) {
+                g_regex_unref (regex);
+                return TRUE;
+        }
+
+        gtk_style_context_add_class (gtk_widget_get_style_context (priv->entry),
+                                     GTK_STYLE_CLASS_ERROR);
+        gtk_entry_set_icon_from_icon_name (GTK_ENTRY (priv->entry),
+                                           GTK_ENTRY_ICON_PRIMARY,
+                                           "dialog-error-symbolic");
+        gtk_widget_set_tooltip_text (priv->entry, error->message);
+        g_error_free (error);
+
+        return FALSE;
+}
+
 static void
 search_changed_cb (GtkSearchEntry *entry,
                    EvSearchBox    *box)
 {
         const char *search_string;
         EvSearchBoxPrivate *priv = GET_PRIVATE (box);
+        EvFindOptions options = priv->options & priv->supported_options;
 
         ev_search_box_clear_job (box);
         priv->pages_searched = 0;
@@ -180,14 +206,11 @@ search_changed_cb (GtkSearchEntry *entry,
         gtk_entry_set_icon_from_icon_name (GTK_ENTRY (priv->entry),
                                            GTK_ENTRY_ICON_PRIMARY,
                                            "edit-find-symbolic");
-        if (priv->supported_options != EV_FIND_DEFAULT) {
-                gtk_entry_set_icon_tooltip_text (GTK_ENTRY (priv->entry),
-                                                 GTK_ENTRY_ICON_PRIMARY,
-                                                 _("Search options"));
-        }
+        gtk_widget_set_tooltip_text (priv->entry, NULL);
 
         search_string = gtk_entry_get_text (GTK_ENTRY (entry));
-        if (search_string && search_string[0]) {
+        if (search_string && search_string[0] &&
+            (!(options & EV_FIND_REGEX) || ev_search_box_check_regex (box, search_string))) {
                 EvDocument *doc = ev_document_model_get_document (priv->model);
 
                 priv->job = ev_job_find_new (doc,
@@ -195,7 +218,7 @@ search_changed_cb (GtkSearchEntry *entry,
                                              ev_document_get_n_pages (doc),
                                              search_string,
                                              FALSE);
-                ev_job_find_set_options (EV_JOB_FIND (priv->job), priv->options);
+                ev_job_find_set_options (EV_JOB_FIND (priv->job), options);
                 g_signal_connect (priv->job, "finished",
                                   G_CALLBACK (find_job_finished_cb),
                                   box);
@@ -224,23 +247,37 @@ next_clicked_cb (GtkButton   *button,
         g_signal_emit (box, signals[NEXT], 0);
 }
 
+static GtkWidget *
+ev_search_box_get_option_button (EvSearchBox  *box,
+                                 EvFindOptions option)
+{
+        EvSearchBoxPrivate *priv = GET_PRIVATE (box);
+
+        switch (option) {
+        case EV_FIND_CASE_SENSITIVE:
+                return priv->case_sensitive_button;
+        case EV_FIND_WHOLE_WORDS_ONLY:
+                return priv->whole_words_only_button;
+        case EV_FIND_REGEX:
+                return priv->regex_button;
+        default:
+                return NULL;
+        }
+}
+
 static void
 ev_search_box_set_supported_options (EvSearchBox  *box,
                                      EvFindOptions options)
 {
         EvSearchBoxPrivate *priv = GET_PRIVATE (box);
-        gboolean            enable_search_options;
 
         if (priv->supported_options == options)
                 return;
 
         priv->supported_options = options;
-        enable_search_options = options != EV_FIND_DEFAULT;
-        g_object_set (priv->entry,
-                      "primary-icon-activatable", enable_search_options,
-                      "primary-icon-sensitive", enable_search_options,
-                      "primary-icon-tooltip-text", enable_search_options ? _("Search options") : NULL,
-                      NULL);
+        gtk_widget_set_visible (priv->case_sensitive_button, options & EV_FIND_CASE_SENSITIVE);
+        gtk_widget_set_visible (priv->whole_words_only_button, options & EV_FIND_WHOLE_WORDS_ONLY);
+        gtk_widget_set_visible (priv->regex_button, options & EV_FIND_REGEX);
 }
 
 static void
@@ -279,105 +316,61 @@ ev_search_box_set_options (EvSearchBox  *box,
 }
 
 static void
-whole_words_only_toggled_cb (GtkCheckMenuItem *menu_item,
-                             EvSearchBox      *box)
+option_button_toggled_cb (GtkToggleButton *button,
+                          EvSearchBox     *box)
 {
         EvSearchBoxPrivate *priv = GET_PRIVATE (box);
-        EvFindOptions options = priv->options;
+        EvFindOptions       option;
+        EvFindOptions       options = priv->options;
 
-        if (gtk_check_menu_item_get_active (menu_item))
-                options |= EV_FIND_WHOLE_WORDS_ONLY;
+        if (GTK_WIDGET (button) == priv->case_sensitive_button)
+                option = EV_FIND_CASE_SENSITIVE;
+        else if (GTK_WIDGET (button) == priv->whole_words_only_button)
+                option = EV_FIND_WHOLE_WORDS_ONLY;
         else
-                options &= ~EV_FIND_WHOLE_WORDS_ONLY;
+                option = EV_FIND_REGEX;
+
+        if (gtk_toggle_button_get_active (button))
+                options |= option;
+        else
+                options &= ~option;
         ev_search_box_set_options (box, options);
 }
 
 static void
-case_sensitive_toggled_cb (GtkCheckMenuItem *menu_item,
-                           EvSearchBox      *box)
+ev_search_box_toggle_option (EvSearchBox *box,
+                             guint        option)
 {
-        EvSearchBoxPrivate *priv = GET_PRIVATE (box);
-        EvFindOptions options = priv->options;
+        GtkWidget *button = ev_search_box_get_option_button (box, option);
 
-        if (gtk_check_menu_item_get_active (menu_item))
-                options |= EV_FIND_CASE_SENSITIVE;
-        else
-                options &= ~EV_FIND_CASE_SENSITIVE;
-        ev_search_box_set_options (box, options);
+        if (button && gtk_widget_get_visible (button))
+                gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON (button),
+                                              !gtk_toggle_button_get_active (GTK_TOGGLE_BUTTON (button)));
 }
 
-static void
-ev_search_box_entry_populate_popup (EvSearchBox *box,
-                                    GtkWidget   *menu)
+static GtkWidget *
+ev_search_box_add_option_button (EvSearchBox *box,
+                                 const gchar *markup,
+                                 const gchar *tooltip)
 {
-        EvSearchBoxPrivate *priv = GET_PRIVATE (box);
+        GtkWidget *button;
+        GtkWidget *label;
 
-        if (priv->supported_options & EV_FIND_WHOLE_WORDS_ONLY) {
-                GtkWidget *menu_item;
+        label = gtk_label_new (NULL);
+        gtk_label_set_markup (GTK_LABEL (label), markup);
+        gtk_widget_show (label);
 
-                menu_item = gtk_check_menu_item_new_with_mnemonic (_("_Whole Words Only"));
-                g_signal_connect (menu_item, "toggled",
-                                  G_CALLBACK (whole_words_only_toggled_cb),
-                                  box);
-                gtk_check_menu_item_set_active (GTK_CHECK_MENU_ITEM (menu_item),
-                                                priv->options & EV_FIND_WHOLE_WORDS_ONLY);
-                gtk_menu_shell_prepend (GTK_MENU_SHELL (menu), menu_item);
-                gtk_widget_show (menu_item);
-        }
+        button = gtk_toggle_button_new ();
+        gtk_container_add (GTK_CONTAINER (button), label);
+        gtk_widget_set_tooltip_text (button, tooltip);
+        gtk_widget_set_focus_on_click (button, FALSE);
+        gtk_style_context_add_class (gtk_widget_get_style_context (button), "search-option");
+        g_signal_connect (button, "toggled",
+                          G_CALLBACK (option_button_toggled_cb),
+                          box);
+        gtk_container_add (GTK_CONTAINER (box), button);
 
-        if (priv->supported_options & EV_FIND_CASE_SENSITIVE) {
-                GtkWidget *menu_item;
-
-                menu_item = gtk_check_menu_item_new_with_mnemonic (_("C_ase Sensitive"));
-                g_signal_connect (menu_item, "toggled",
-                                  G_CALLBACK (case_sensitive_toggled_cb),
-                                  box);
-                gtk_check_menu_item_set_active (GTK_CHECK_MENU_ITEM (menu_item),
-                                                priv->options & EV_FIND_CASE_SENSITIVE);
-                gtk_menu_shell_prepend (GTK_MENU_SHELL (menu), menu_item);
-                gtk_widget_show (menu_item);
-        }
-}
-
-static void
-entry_icon_release_cb (GtkEntry            *entry,
-                       GtkEntryIconPosition icon_pos,
-                       GdkEventButton      *event,
-                       EvSearchBox         *box)
-{
-        GtkWidget *menu;
-
-        if (event->button != GDK_BUTTON_PRIMARY)
-                return;
-
-        if (icon_pos == GTK_ENTRY_ICON_SECONDARY)
-                return;
-
-        menu = gtk_menu_new ();
-        ev_search_box_entry_populate_popup (box, menu);
-        gtk_widget_show (menu);
-
-        gtk_menu_popup_at_widget (GTK_MENU (menu), GTK_WIDGET (entry),
-				  GDK_GRAVITY_SOUTH_WEST,
-				  GDK_GRAVITY_NORTH_WEST,
-				  (GdkEvent *)event);
-}
-
-static void
-entry_populate_popup_cb (GtkEntry    *entry,
-                         GtkMenu     *menu,
-                         EvSearchBox *box)
-{
-        EvSearchBoxPrivate *priv = GET_PRIVATE (box);
-        GtkWidget          *separator;
-
-        if (priv->supported_options == EV_FIND_DEFAULT)
-                return;
-
-        separator = gtk_separator_menu_item_new ();
-        gtk_menu_shell_prepend (GTK_MENU_SHELL (menu), separator);
-        gtk_widget_show (separator);
-        ev_search_box_entry_populate_popup (box, GTK_WIDGET (menu));
+        return button;
 }
 
 static void
@@ -566,6 +559,15 @@ ev_search_box_class_init (EvSearchBoxClass *klass)
                               0, NULL, NULL,
                               g_cclosure_marshal_VOID__VOID,
                               G_TYPE_NONE, 0);
+        signals[TOGGLE_OPTION] =
+                g_signal_new_class_handler ("toggle-option",
+                                            G_OBJECT_CLASS_TYPE (object_class),
+                                            G_SIGNAL_RUN_LAST | G_SIGNAL_ACTION,
+                                            G_CALLBACK (ev_search_box_toggle_option),
+                                            NULL, NULL,
+                                            g_cclosure_marshal_VOID__UINT,
+                                            G_TYPE_NONE, 1,
+                                            G_TYPE_UINT);
 
         binding_set = gtk_binding_set_by_class (klass);
         gtk_binding_entry_add_signal (binding_set, GDK_KEY_Return, GDK_SHIFT_MASK,
@@ -578,6 +580,17 @@ ev_search_box_class_init (EvSearchBoxClass *klass)
                                       "previous", 0);
         gtk_binding_entry_add_signal (binding_set, GDK_KEY_Down, GDK_CONTROL_MASK,
                                       "next", 0);
+
+        /* Same keys as VS Code's find widget */
+        gtk_binding_entry_add_signal (binding_set, GDK_KEY_c, GDK_MOD1_MASK,
+                                      "toggle-option", 1,
+                                      G_TYPE_UINT, EV_FIND_CASE_SENSITIVE);
+        gtk_binding_entry_add_signal (binding_set, GDK_KEY_w, GDK_MOD1_MASK,
+                                      "toggle-option", 1,
+                                      G_TYPE_UINT, EV_FIND_WHOLE_WORDS_ONLY);
+        gtk_binding_entry_add_signal (binding_set, GDK_KEY_r, GDK_MOD1_MASK,
+                                      "toggle-option", 1,
+                                      G_TYPE_UINT, EV_FIND_REGEX);
 }
 
 static void
@@ -592,9 +605,19 @@ ev_search_box_init (EvSearchBox *box)
         gtk_style_context_add_class (style_context, GTK_STYLE_CLASS_RAISED);
 
         priv->entry = gtk_search_entry_new ();
+        /* Kept at full strength so a not-found or error icon stands out */
+        gtk_entry_set_icon_sensitive (GTK_ENTRY (priv->entry), GTK_ENTRY_ICON_PRIMARY, TRUE);
 
         gtk_box_pack_start (GTK_BOX (box), priv->entry, TRUE, TRUE, 0);
         gtk_widget_show (priv->entry);
+
+        /* Shown by ev_search_box_set_supported_options () */
+        priv->case_sensitive_button =
+                ev_search_box_add_option_button (box, "Aa", _("Match Case (Alt+C)"));
+        priv->whole_words_only_button =
+                ev_search_box_add_option_button (box, "<u>ab</u>", _("Match Whole Word (Alt+W)"));
+        priv->regex_button =
+                ev_search_box_add_option_button (box, "<b>.*</b>", _("Use Regular Expression (Alt+R)"));
 
         priv->prev_button = gtk_button_new_from_icon_name ("go-up-symbolic", GTK_ICON_SIZE_MENU);
         gtk_widget_set_tooltip_text (priv->prev_button, _("Find previous occurrence of the search string"));
@@ -612,12 +635,6 @@ ev_search_box_init (EvSearchBox *box)
 
         g_signal_connect (priv->entry, "search-changed",
                           G_CALLBACK (search_changed_cb),
-                          box);
-        g_signal_connect (priv->entry, "icon-release",
-                          G_CALLBACK (entry_icon_release_cb),
-                          box);
-        g_signal_connect (priv->entry, "populate-popup",
-                          G_CALLBACK (entry_populate_popup_cb),
                           box);
         g_signal_connect (priv->entry, "activate",
                           G_CALLBACK (entry_activate_cb),

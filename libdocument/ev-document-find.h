@@ -64,10 +64,22 @@ EvFindRectangle *ev_find_rectangle_copy     (EvFindRectangle *ev_find_rect);
 EV_PUBLIC
 void             ev_find_rectangle_free     (EvFindRectangle *ev_find_rect);
 
+/**
+ * EvFindOptions:
+ * @EV_FIND_DEFAULT: no options
+ * @EV_FIND_CASE_SENSITIVE: match the case of the search text
+ * @EV_FIND_WHOLE_WORDS_ONLY: only accept matches that do not start or end
+ *   in the middle of a word
+ * @EV_FIND_REGEX: treat the search text as a Perl-compatible regular
+ *   expression. Only honoured by ev_document_find_find_text_extended(), and
+ *   only for documents that also implement the text layout of
+ *   #EvDocumentText; ev_document_find_get_supported_options() reports it then.
+ */
 typedef enum {
 	EV_FIND_DEFAULT          = 0,
 	EV_FIND_CASE_SENSITIVE   = 1 << 0,
-	EV_FIND_WHOLE_WORDS_ONLY = 1 << 1
+	EV_FIND_WHOLE_WORDS_ONLY = 1 << 1,
+	EV_FIND_REGEX            = 1 << 2
 } EvFindOptions;
 
 struct _EvDocumentFindInterface

@@ -383,6 +383,27 @@
                 <property name="action-name">win.find-previous</property>
               </object>
             </child>
+            <child>
+              <object class="GtkShortcutsShortcut">
+                <property name="visible">True</property>
+                <property name="title" translatable="yes" context="shortcut window">Toggle case-sensitive search</property>
+                <property name="accelerator">&lt;alt&gt;C</property>
+              </object>
+            </child>
+            <child>
+              <object class="GtkShortcutsShortcut">
+                <property name="visible">True</property>
+                <property name="title" translatable="yes" context="shortcut window">Toggle whole word search</property>
+                <property name="accelerator">&lt;alt&gt;W</property>
+              </object>
+            </child>
+            <child>
+              <object class="GtkShortcutsShortcut">
+                <property name="visible">True</property>
+                <property name="title" translatable="yes" context="shortcut window">Toggle regular expression search</property>
+                <property name="accelerator">&lt;alt&gt;R</property>
+              </object>
+            </child>
           </object>
         </child>
         <child>
