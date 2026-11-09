@@ -65,6 +65,11 @@
     <key name="inverted-colors" type="b">
       <default>false</default>
     </key>
+    <key name="center-content" type="b">
+      <default>false</default>
+      <summary>Center the content of each page horizontally.</summary>
+      <description>Shift the content of every page so that it is centered between the page edges. Useful for books typeset for two-sided printing, whose text block moves left and right from one page to the next. Remembered per document; this is the value for documents opened for the first time.</description>
+    </key>
     <key name="continuous" type="b">
       <default>true</default>
       <summary>Display the document as a continuous stream of pages instead of page at a time.</summary>

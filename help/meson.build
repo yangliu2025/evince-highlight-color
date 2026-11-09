@@ -23,6 +23,7 @@ if enable_user_doc
     'annotations-save.page',
     'bookmarks.page',
     'bug-filing.page',
+    'center-content.page',
     'commandline.page',
     'convertpdf.page',
     'convertPostScript.page',

@@ -975,7 +975,7 @@ ev_page_accessible_get_offset_at_point (AtkText      *text,
 	}
 
 	ev_view_get_page_extents (view, self->priv->page, &page_area, &border);
-	_ev_view_transform_view_point_to_doc_point (view, &view_point, &page_area, &border, &doc_x, &doc_y);
+	_ev_view_transform_view_point_to_doc_point (view, self->priv->page, &view_point, &page_area, &border, &doc_x, &doc_y);
 
 	for (i = 0; i < n_areas; i++) {
 		rect = areas + i;
@@ -1158,7 +1158,7 @@ ev_page_accessible_scroll_substring_to_point (AtkText      *text,
 	}
 
 	ev_view_get_page_extents (view, self->priv->page, &page_area, &border);
-	_ev_view_transform_view_point_to_doc_point (view, &view_point, &page_area, &border, &doc_x, &doc_y);
+	_ev_view_transform_view_point_to_doc_point (view, self->priv->page, &view_point, &page_area, &border, &doc_x, &doc_y);
 
 	/* Calculate scrolling difference */
 	start_point.x -= doc_x;

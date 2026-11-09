@@ -1,0 +1,41 @@
+<page xmlns="http://projectmallard.org/1.0/"
+      type="topic" style="task"
+      id="center-content">
+
+  <info>
+    <link type="guide" xref="index#tips"/>
+
+    <desc>
+    Keep the text in the middle of the page when a document shifts it left and right.
+    </desc>
+
+    <revision pkgversion="46.3.1" date="2026-11-09" status="draft"/>
+    <license>
+      <p>Creative Commons Share Alike 3.0</p>
+    </license>
+
+  </info>
+
+<title>Center the content of each page</title>
+
+ <p>Many books are typeset for printing, with a wider inner margin on every
+ page. On screen the text then jumps from the left on one page to the right on
+ the next. To keep it in the middle, press the menu button in the top-right
+ corner of the window and select <gui style="menuitem">Center Content</gui>,
+ or press <keyseq><key>M</key></keyseq>.</p>
+
+ <p><app>Document Viewer</app> looks at what is printed on each page and moves
+ it sideways so that the left and right margins are equal. The page itself
+ keeps its size and position, so scrolling and zooming work as before, and you
+ can still select text, follow links and add annotations.</p>
+
+ <p>The setting is remembered for each document. To have it switched on for
+ documents you have not opened before, use
+ <cmd>gsettings set org.gnome.Evince.Default center-content true</cmd>.</p>
+
+<note style="tip">
+ <p>Only the horizontal position changes. A page with very little on it, such
+ as a chapter opening, is centered on its own content, so it can sit slightly
+ differently from the pages around it.</p>
+</note>
+</page>

@@ -42,6 +42,7 @@ struct _EvDocumentModel
 	guint rtl : 1;
 	guint fullscreen : 1;
 	guint inverted_colors : 1;
+	guint center_content : 1;
 
 	gdouble max_scale;
 	gdouble min_scale;
@@ -62,7 +63,8 @@ enum {
 	PROP_FULLSCREEN,
 	PROP_MIN_SCALE,
 	PROP_MAX_SCALE,
-	PROP_PAGE_LAYOUT
+	PROP_PAGE_LAYOUT,
+	PROP_CENTER_CONTENT
 };
 
 enum
@@ -139,6 +141,9 @@ ev_document_model_set_property (GObject      *object,
 	case PROP_FULLSCREEN:
 		ev_document_model_set_fullscreen (model, g_value_get_boolean (value));
 		break;
+	case PROP_CENTER_CONTENT:
+		ev_document_model_set_center_content (model, g_value_get_boolean (value));
+		break;
 	default:
 		G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
 	}
@@ -195,6 +200,9 @@ ev_document_model_get_property (GObject    *object,
 	case PROP_FULLSCREEN:
 		g_value_set_boolean (value, ev_document_model_get_fullscreen (model));
 		break;
+	case PROP_CENTER_CONTENT:
+		g_value_set_boolean (value, model->center_content);
+		break;
 	default:
 		G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
 	}
@@ -239,6 +247,21 @@ ev_document_model_class_init (EvDocumentModelClass *klass)
 					 g_param_spec_boolean ("inverted-colors",
 							       "Inverted Colors",
 							       "Whether document is displayed with inverted colors",
+							       FALSE,
+							       G_PARAM_READWRITE |
+                                                               G_PARAM_STATIC_STRINGS));
+	/**
+	 * EvDocumentModel:center-content:
+	 *
+	 * Whether the content of every page is shifted horizontally so that
+	 * it is centered within the page, compensating for layouts whose
+	 * margins alternate between odd and even pages.
+	 */
+	g_object_class_install_property (g_object_class,
+					 PROP_CENTER_CONTENT,
+					 g_param_spec_boolean ("center-content",
+							       "Center Content",
+							       "Whether the content of each page is centered horizontally",
 							       FALSE,
 							       G_PARAM_READWRITE |
                                                                G_PARAM_STATIC_STRINGS));
@@ -644,6 +667,46 @@ ev_document_model_get_inverted_colors (EvDocumentModel *model)
 	g_return_val_if_fail (EV_IS_DOCUMENT_MODEL (model), FALSE);
 
 	return model->inverted_colors;
+}
+
+/**
+ * ev_document_model_set_center_content:
+ * @model: a #EvDocumentModel
+ * @center_content: whether to center the content of each page
+ *
+ * Sets whether the view shifts the content of every page horizontally so
+ * that its ink is centered between the page edges. This evens out books
+ * typeset for two-sided printing, whose text block moves left and right
+ * from one page to the next.
+ */
+void
+ev_document_model_set_center_content (EvDocumentModel *model,
+				      gboolean         center_content)
+{
+	g_return_if_fail (EV_IS_DOCUMENT_MODEL (model));
+
+	center_content = center_content != FALSE;
+
+	if (center_content == model->center_content)
+		return;
+
+	model->center_content = center_content;
+
+	g_object_notify (G_OBJECT (model), "center-content");
+}
+
+/**
+ * ev_document_model_get_center_content:
+ * @model: a #EvDocumentModel
+ *
+ * Returns: whether the content of each page is centered horizontally
+ */
+gboolean
+ev_document_model_get_center_content (EvDocumentModel *model)
+{
+	g_return_val_if_fail (EV_IS_DOCUMENT_MODEL (model), FALSE);
+
+	return model->center_content;
 }
 
 void

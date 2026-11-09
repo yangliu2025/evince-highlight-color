@@ -153,6 +153,17 @@ typedef struct {
 	guint      delay_timeout_id;
 } EvLinkPreview;
 
+/* Horizontal offset applied to the content of a page when centering it,
+ * measured on the rendered page surface. */
+typedef struct {
+	gdouble  shift;          /* Fraction of the rotated page width */
+	gint     measured_width; /* Surface width it was measured on, 0 if never */
+	gboolean stale;          /* Keep using shift but measure again */
+	gdouble  bg_red;         /* Page background, used for the exposed band */
+	gdouble  bg_green;
+	gdouble  bg_blue;
+} EvViewContentShift;
+
 struct _EvView {
 	GtkContainer layout;
 
@@ -291,6 +302,12 @@ struct _EvView {
 
 	/* Link preview */
 	EvLinkPreview link_preview;
+
+	/* Center content */
+	gboolean            center_content;
+	EvViewContentShift *content_shifts;
+	gint                n_content_shifts;
+	guint               content_shift_idle_id;
 };
 
 struct _EvViewClass {
@@ -330,13 +347,17 @@ void _get_page_size_for_scale_and_rotation (EvDocument *document,
 					    gint        rotation,
 					    gint       *page_width,
 					    gint       *page_height);
+gint _ev_view_get_content_shift (EvView *view,
+				 gint    page);
 void _ev_view_transform_view_point_to_doc_point (EvView       *view,
+						 gint          page,
 						 GdkPoint     *view_point,
 						 GdkRectangle *page_area,
 						 GtkBorder    *border,
 						 double       *doc_point_x,
 						 double       *doc_point_y);
 void _ev_view_transform_view_rect_to_doc_rect (EvView       *view,
+					       gint          page,
 					       GdkRectangle *view_rect,
 					       GdkRectangle *page_area,
 					       GtkBorder    *border,

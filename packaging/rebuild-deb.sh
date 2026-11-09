@@ -16,8 +16,8 @@ set -euo pipefail
 # newer upstream tarball.
 BASE_REF="upstream/46.3.1"
 PATCH_NAME="highlight-annotation-colors.patch"
-PATCH_PATHS=(backend help/C libdocument libmisc libview shell)
-NEW_SYMBOLS=(ev_view_add_annotation ev_view_clear_selection ev_view_get_selected_annotation ev_view_set_annotation_color)
+PATCH_PATHS=(backend data help libdocument libmisc libview shell)
+NEW_SYMBOLS=(ev_document_model_get_center_content ev_document_model_set_center_content ev_view_add_annotation ev_view_clear_selection ev_view_get_selected_annotation ev_view_set_annotation_color)
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 WORKDIR="${1:-$PWD/evince-deb-build}"
@@ -66,7 +66,7 @@ QUILT_PATCHES=debian/patches quilt pop -a
 DEBEMAIL="${DEBEMAIL:-$(git -C "$REPO" config user.email)}" \
 DEBFULLNAME="${DEBFULLNAME:-$(git -C "$REPO" config user.name)}" \
 	dch --newversion "$LOCAL_VERSION" --distribution "$(lsb_release -cs)" \
-	    "Local build: highlight colour picker in the view popup menu."
+	    "Local build: highlight colour picker, annotation editing and search tweaks, Center Content toggle."
 
 DEB_BUILD_OPTIONS="parallel=$(nproc)" dpkg-buildpackage -b -uc -us
 

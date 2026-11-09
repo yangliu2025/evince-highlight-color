@@ -296,6 +296,13 @@
             <child>
               <object class="GtkShortcutsShortcut">
                 <property name="visible">True</property>
+                <property name="title" translatable="yes" context="shortcut window">Toggle centering of page content</property>
+                <property name="action-name">win.center-content</property>
+              </object>
+            </child>
+            <child>
+              <object class="GtkShortcutsShortcut">
+                <property name="visible">True</property>
                 <property name="title" translatable="yes" context="shortcut window">Toggle continuous scrolling</property>
                 <property name="action-name">win.continuous</property>
               </object>

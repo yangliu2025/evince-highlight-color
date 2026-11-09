@@ -747,6 +747,8 @@ ev_window_update_actions_sensitivity (EvWindow *ev_window)
 				      !recent_view_mode);
 	ev_window_set_action_enabled (ev_window, "inverted-colors",
 				      has_pages && !recent_view_mode);
+	ev_window_set_action_enabled (ev_window, "center-content",
+				      has_pages && !recent_view_mode);
 #if WITH_GSPELL
 	ev_window_set_action_enabled (ev_window, "enable-spellchecking", TRUE);
 #else
@@ -1441,6 +1443,10 @@ ev_window_init_metadata_with_default_values (EvWindow *window)
 		ev_metadata_set_boolean (metadata, "inverted-colors",
 					 g_settings_get_boolean (settings, "inverted-colors"));
 	}
+	if (!ev_metadata_has_key (metadata, "center-content")) {
+		ev_metadata_set_boolean (metadata, "center-content",
+					 g_settings_get_boolean (settings, "center-content"));
+	}
 	if (!ev_metadata_has_key (metadata, "sizing_mode")) {
 		EvSizingMode mode = g_settings_get_enum (settings, "sizing-mode");
 		GEnumValue *enum_value = g_enum_get_value (g_type_class_peek (EV_TYPE_SIZING_MODE), mode);
@@ -1501,6 +1507,7 @@ setup_model_from_metadata (EvWindow *window)
 	gdouble  zoom;
 	gint     rotation;
 	gboolean inverted_colors = FALSE;
+	gboolean center_content = FALSE;
 	gboolean continuous = FALSE;
 	gboolean dual_page = FALSE;
 	gboolean dual_page_odd_left = FALSE;
@@ -1556,6 +1563,11 @@ setup_model_from_metadata (EvWindow *window)
 	/* Inverted Colors */
 	if (ev_metadata_get_boolean (priv->metadata, "inverted-colors", &inverted_colors)) {
 		ev_document_model_set_inverted_colors (priv->model, inverted_colors);
+	}
+
+	/* Center Content */
+	if (ev_metadata_get_boolean (priv->metadata, "center-content", &center_content)) {
+		ev_document_model_set_center_content (priv->model, center_content);
 	}
 
 	/* Continuous */
@@ -1793,6 +1805,7 @@ ev_window_setup_default (EvWindow *ev_window)
 	ev_document_model_set_dual_page_odd_pages_left (model, g_settings_get_boolean (settings, "dual-page-odd-left"));
 	ev_document_model_set_rtl (model, gtk_widget_get_default_direction () == GTK_TEXT_DIR_RTL ? TRUE : FALSE);
 	ev_document_model_set_inverted_colors (model, g_settings_get_boolean (settings, "inverted-colors"));
+	ev_document_model_set_center_content (model, g_settings_get_boolean (settings, "center-content"));
 	ev_document_model_set_sizing_mode (model, g_settings_get_enum (settings, "sizing-mode"));
 	if (ev_document_model_get_sizing_mode (model) == EV_SIZING_FREE)
 		ev_document_model_set_scale (model, g_settings_get_double (settings, "zoom"));
@@ -5278,6 +5291,19 @@ ev_window_cmd_view_inverted_colors (GSimpleAction *action,
 }
 
 static void
+ev_window_cmd_view_center_content (GSimpleAction *action,
+				   GVariant      *state,
+				   gpointer       user_data)
+{
+	EvWindow *ev_window = user_data;
+	EvWindowPrivate *priv = GET_PRIVATE (ev_window);
+
+	ev_document_model_set_center_content (priv->model,
+					      g_variant_get_boolean (state));
+	g_simple_action_set_state (action, state);
+}
+
+static void
 ev_window_cmd_view_enable_spellchecking (GSimpleAction *action,
 				    GVariant      *state,
 				    gpointer       user_data)
@@ -5640,6 +5666,24 @@ ev_window_inverted_colors_changed_cb (EvDocumentModel *model,
 	if (priv->metadata && !ev_window_is_empty (window))
 		ev_metadata_set_boolean (priv->metadata, "inverted-colors",
 					 inverted_colors);
+}
+
+static void
+ev_window_center_content_changed_cb (EvDocumentModel *model,
+				     GParamSpec      *pspec,
+				     EvWindow        *window)
+{
+	EvWindowPrivate *priv = GET_PRIVATE (window);
+	gboolean center_content = ev_document_model_get_center_content (model);
+	GAction *action;
+
+	action = g_action_map_lookup_action (G_ACTION_MAP (window), "center-content");
+	g_simple_action_set_state (G_SIMPLE_ACTION (action),
+				   g_variant_new_boolean (center_content));
+
+	if (priv->metadata && !ev_window_is_empty (window))
+		ev_metadata_set_boolean (priv->metadata, "center-content",
+					 center_content);
 }
 
 static void
@@ -6839,6 +6883,7 @@ static const GActionEntry actions[] = {
 	{ "rtl", NULL, NULL, "false", ev_window_cmd_rtl },
 	{ "show-side-pane", NULL, NULL, "false", ev_window_view_cmd_toggle_sidebar },
 	{ "inverted-colors", NULL, NULL, "false", ev_window_cmd_view_inverted_colors },
+	{ "center-content", NULL, NULL, "false", ev_window_cmd_view_center_content },
 	{ "enable-spellchecking", NULL, NULL, "false", ev_window_cmd_view_enable_spellchecking },
 	{ "fullscreen", NULL, NULL, "false", ev_window_cmd_view_fullscreen },
 	{ "presentation", ev_window_cmd_view_presentation },
@@ -8325,6 +8370,10 @@ ev_window_init (EvWindow *ev_window)
 	g_signal_connect (priv->model,
 			  "notify::inverted-colors",
 			  G_CALLBACK (ev_window_inverted_colors_changed_cb),
+			  ev_window);
+	g_signal_connect (priv->model,
+			  "notify::center-content",
+			  G_CALLBACK (ev_window_center_content_changed_cb),
 			  ev_window);
 
      	/* Connect sidebar signals */

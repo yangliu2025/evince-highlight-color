@@ -951,7 +951,7 @@ compute_scroll_increment (EvView        *view,
 	rect.y = view->scroll_y + (scroll == GTK_SCROLL_PAGE_BACKWARD ? 5 : allocation.height - 5);
 	rect.width = page_area.width;
 	rect.height = 1;
-	_ev_view_transform_view_rect_to_doc_rect (view, &rect, &page_area, &border, &doc_rect);
+	_ev_view_transform_view_rect_to_doc_rect (view, page, &rect, &page_area, &border, &doc_rect);
 
 	/* Convert the doc rectangle into a GdkRectangle */
 	rect.x = doc_rect.x1;
@@ -1431,8 +1431,29 @@ get_doc_page_size (EvView  *view,
 	}
 }
 
+gint
+_ev_view_get_content_shift (EvView *view,
+			    gint    page)
+{
+	EvViewContentShift *cs;
+	gint width;
+
+	if (!view->center_content || !view->content_shifts ||
+	    page < 0 || page >= view->n_content_shifts)
+		return 0;
+
+	cs = &view->content_shifts[page];
+	if (cs->measured_width == 0 || cs->shift == 0.)
+		return 0;
+
+	ev_view_get_page_size (view, page, &width, NULL);
+
+	return (gint) floor (cs->shift * width + 0.5);
+}
+
 void
 _ev_view_transform_view_point_to_doc_point (EvView       *view,
+					    gint          page,
 					    GdkPoint     *view_point,
 					    GdkRectangle *page_area,
 					    GtkBorder    *border,
@@ -1440,8 +1461,9 @@ _ev_view_transform_view_point_to_doc_point (EvView       *view,
 					    double       *doc_point_y)
 {
 	double x, y, width, height, doc_x, doc_y;
+	gint shift = _ev_view_get_content_shift (view, page);
 
-	x = doc_x = MAX ((double) (view_point->x - page_area->x - border->left) / view->scale, 0);
+	x = doc_x = MAX ((double) (view_point->x - page_area->x - border->left - shift) / view->scale, 0);
 	y = doc_y = MAX ((double) (view_point->y - page_area->y - border->top) / view->scale, 0);
 
 	ev_document_get_page_size (view->document, view->current_page, &width, &height);
@@ -1473,12 +1495,15 @@ _ev_view_transform_view_point_to_doc_point (EvView       *view,
 
 void
 _ev_view_transform_view_rect_to_doc_rect (EvView       *view,
+					  gint          page,
 					  GdkRectangle *view_rect,
 					  GdkRectangle *page_area,
 					  GtkBorder    *border,
 					  EvRectangle  *doc_rect)
 {
-	doc_rect->x1 = MAX ((double) (view_rect->x - page_area->x - border->left) / view->scale, 0);
+	gint shift = _ev_view_get_content_shift (view, page);
+
+	doc_rect->x1 = MAX ((double) (view_rect->x - page_area->x - border->left - shift) / view->scale, 0);
 	doc_rect->y1 = MAX ((double) (view_rect->y - page_area->y - border->top) / view->scale, 0);
 	doc_rect->x2 = doc_rect->x1 + (double) view_rect->width / view->scale;
 	doc_rect->y2 = doc_rect->y1 + (double) view_rect->height / view->scale;
@@ -1549,7 +1574,8 @@ _ev_view_transform_doc_point_to_view_point (EvView   *view,
 
 	ev_view_get_page_extents (view, page, &page_area, &border);
 
-	view_point->x = view_point->x + page_area.x + border.left;
+	view_point->x = view_point->x + page_area.x + border.left +
+		_ev_view_get_content_shift (view, page);
 	view_point->y = view_point->y + page_area.y + border.top;
 }
 
@@ -1607,7 +1633,8 @@ _ev_view_transform_doc_rect_to_view_rect (EvView       *view,
 
 	ev_view_get_page_extents (view, page, &page_area, &border);
 
-	view_rect->x = (gint)(x * view->scale + 0.5) + page_area.x + border.left;
+	view_rect->x = (gint)(x * view->scale + 0.5) + page_area.x + border.left +
+		_ev_view_get_content_shift (view, page);
 	view_rect->y = (gint)(y * view->scale + 0.5) + page_area.y + border.top;
 	view_rect->width = (gint)(w * view->scale + 0.5);
 	view_rect->height = (gint)(h * view->scale + 0.5);
@@ -1642,8 +1669,13 @@ find_page_at_location (EvView  *view,
 		    (x < page_area.x + page_area.width - border.right) &&
 		    (y >= page_area.y + border.top) &&
 		    (y < page_area.y + page_area.height - border.bottom)) {
+			gint content_width = page_area.width - border.left - border.right;
+
 			*page = i;
-			*x_offset = x - (page_area.x + border.left);
+			/* Offsets are relative to the (possibly shifted) content;
+			 * the band the shift exposes maps onto the content edge. */
+			*x_offset = CLAMP (x - (page_area.x + border.left) - _ev_view_get_content_shift (view, i),
+					   0, content_width - 1);
 			*y_offset = y - (page_area.y + border.top);
 			return;
 		}
@@ -3409,7 +3441,7 @@ annotation_window_moved (EvAnnotationWindow *window,
 	view_rect.height = height;
 
 	ev_view_get_page_extents (view, child->page, &page_area, &border);
-	_ev_view_transform_view_rect_to_doc_rect (view, &view_rect, &page_area, &border, &doc_rect);
+	_ev_view_transform_view_rect_to_doc_rect (view, child->page, &view_rect, &page_area, &border, &doc_rect);
 	child->orig_x = doc_rect.x1;
 	child->orig_y = doc_rect.y1;
 }
@@ -3838,9 +3870,9 @@ ev_view_create_annotation (EvView *view)
 	}
 
 	ev_view_get_page_extents (view, annot_page, &page_area, &border);
-	_ev_view_transform_view_point_to_doc_point (view, &view->adding_annot_info.start, &page_area, &border,
+	_ev_view_transform_view_point_to_doc_point (view, annot_page, &view->adding_annot_info.start, &page_area, &border,
 						    &start.x, &start.y);
-	_ev_view_transform_view_point_to_doc_point (view, &view->adding_annot_info.stop, &page_area, &border,
+	_ev_view_transform_view_point_to_doc_point (view, annot_page, &view->adding_annot_info.stop, &page_area, &border,
 						    &end.x, &end.y);
 
 	ev_view_create_annotation_real (view, annot_page, start, end);
@@ -5954,7 +5986,7 @@ ev_view_button_press_event (GtkWidget      *widget,
 					view->moving_annot_info.start = view_point;
 					annot_page = ev_annotation_get_page_index (annot);
 					ev_view_get_page_extents (view, annot_page, &page_area, &border);
-					_ev_view_transform_view_point_to_doc_point (view, &view_point,
+					_ev_view_transform_view_point_to_doc_point (view, annot_page, &view_point,
 										    &page_area, &border,
 										    &doc_point.x, &doc_point.y);
 
@@ -6331,9 +6363,9 @@ ev_view_motion_notify_event (GtkWidget      *widget,
 			view->adding_annot_info.stop.y = event->y + view->scroll_y;
 			annot_page = ev_annotation_get_page_index (view->adding_annot_info.annot);
 			ev_view_get_page_extents (view, annot_page, &page_area, &border);
-			_ev_view_transform_view_point_to_doc_point (view, &view->adding_annot_info.start, &page_area, &border,
+			_ev_view_transform_view_point_to_doc_point (view, annot_page, &view->adding_annot_info.start, &page_area, &border,
 								    &start.x, &start.y);
-			_ev_view_transform_view_point_to_doc_point (view, &view->adding_annot_info.stop, &page_area, &border,
+			_ev_view_transform_view_point_to_doc_point (view, annot_page, &view->adding_annot_info.stop, &page_area, &border,
 								    &end.x, &end.y);
 
 			switch (view->adding_annot_info.type) {
@@ -6397,7 +6429,7 @@ ev_view_motion_notify_event (GtkWidget      *widget,
 			ev_annotation_get_area (view->moving_annot_info.annot, &current_area);
 			annot_page = ev_annotation_get_page_index (view->moving_annot_info.annot);
 			ev_view_get_page_extents (view, annot_page, &page_area, &border);
-			_ev_view_transform_view_point_to_doc_point (view, &view_point, &page_area, &border,
+			_ev_view_transform_view_point_to_doc_point (view, annot_page, &view_point, &page_area, &border,
 								    &doc_point.x, &doc_point.y);
 
 			ev_document_get_page_size (view->document, annot_page, &page_width, &page_height);
@@ -7850,6 +7882,179 @@ draw_selection_region (cairo_t        *cr,
 	cairo_restore (cr);
 }
 
+static int
+compare_guint8 (gconstpointer a,
+		gconstpointer b)
+{
+	return (gint) *(const guint8 *) a - (gint) *(const guint8 *) b;
+}
+
+static inline void
+read_pixel_over_white (const guint8 *data,
+		       gint          stride,
+		       gboolean      has_alpha,
+		       gint          x,
+		       gint          y,
+		       guint8       *r,
+		       guint8       *g,
+		       guint8       *b)
+{
+	guint32 pixel = *(const guint32 *) (data + y * stride + x * 4);
+	guint8  white = has_alpha ? 255 - (pixel >> 24) : 0;
+
+	/* Premultiplied ARGB composited over white */
+	*r = ((pixel >> 16) & 0xff) + white;
+	*g = ((pixel >> 8) & 0xff) + white;
+	*b = (pixel & 0xff) + white;
+}
+
+/* Measures where the ink of a rendered page lies horizontally and returns the
+ * shift, as a fraction of the surface width, that centers it. The background
+ * is the median color of the surface border, so inverted colors and tinted
+ * scans work as well. Returns FALSE if the surface can't be read. */
+static gboolean
+measure_content_shift (cairo_surface_t    *surface,
+		       EvViewContentShift *cs)
+{
+	cairo_format_t format;
+	const guint8  *data;
+	gint           width, height, stride;
+	gint           x, y, step, n, i;
+	gboolean       has_alpha;
+	guint8        *samples[3];
+	guint8         bg[3];
+	guint         *columns;
+	guint64        total = 0, trim, acc;
+	gint           left, right;
+
+	if (cairo_surface_get_type (surface) != CAIRO_SURFACE_TYPE_IMAGE)
+		return FALSE;
+
+	format = cairo_image_surface_get_format (surface);
+	if (format != CAIRO_FORMAT_ARGB32 && format != CAIRO_FORMAT_RGB24)
+		return FALSE;
+
+	cairo_surface_flush (surface);
+	data = cairo_image_surface_get_data (surface);
+	width = cairo_image_surface_get_width (surface);
+	height = cairo_image_surface_get_height (surface);
+	stride = cairo_image_surface_get_stride (surface);
+	if (!data || width < 16 || height < 16)
+		return FALSE;
+
+	has_alpha = format == CAIRO_FORMAT_ARGB32;
+
+	/* Background: median of 64 samples along each edge */
+	for (i = 0; i < 3; i++)
+		samples[i] = g_new (guint8, 4 * 64);
+	n = 0;
+	for (i = 0; i < 64; i++) {
+		gint sx = i * (width - 1) / 63;
+		gint sy = i * (height - 1) / 63;
+		gint pts[4][2] = { { sx, 0 }, { sx, height - 1 }, { 0, sy }, { width - 1, sy } };
+		gint k;
+
+		for (k = 0; k < 4; k++, n++)
+			read_pixel_over_white (data, stride, has_alpha, pts[k][0], pts[k][1],
+					       &samples[0][n], &samples[1][n], &samples[2][n]);
+	}
+	for (i = 0; i < 3; i++) {
+		qsort (samples[i], n, sizeof (guint8), compare_guint8);
+		bg[i] = samples[i][n / 2];
+		g_free (samples[i]);
+	}
+
+	cs->bg_red = bg[0] / 255.;
+	cs->bg_green = bg[1] / 255.;
+	cs->bg_blue = bg[2] / 255.;
+
+	/* Count ink pixels per column on a subset of the rows */
+	columns = g_new0 (guint, width);
+	step = MAX (1, height / 1024);
+	for (y = 0; y < height; y += step) {
+		for (x = 0; x < width; x++) {
+			guint8 r, g, b;
+
+			read_pixel_over_white (data, stride, has_alpha, x, y, &r, &g, &b);
+			if (ABS (r - bg[0]) > 48 || ABS (g - bg[1]) > 48 || ABS (b - bg[2]) > 48)
+				columns[x]++;
+		}
+	}
+
+	for (x = 0; x < width; x++)
+		total += columns[x];
+
+	if (total == 0) {
+		g_free (columns);
+		cs->shift = 0.;
+		return TRUE;
+	}
+
+	/* Ignore a tiny fraction of the ink on each side, e.g. specks of dust */
+	trim = total / 2000;
+	for (left = 0, acc = 0; left < width - 1; left++) {
+		acc += columns[left];
+		if (acc > trim)
+			break;
+	}
+	for (right = width - 1, acc = 0; right > left; right--) {
+		acc += columns[right];
+		if (acc > trim)
+			break;
+	}
+	g_free (columns);
+
+	/* The content moves by the difference between the margins over two */
+	cs->shift = ((gdouble) (width - 1 - right) - left) / 2. / width;
+
+	return TRUE;
+}
+
+static gboolean
+content_shift_idle_cb (EvView *view)
+{
+	view->content_shift_idle_id = 0;
+
+	/* Child widgets and the whole page follow the new shift */
+	gtk_widget_queue_allocate (GTK_WIDGET (view));
+	gtk_widget_queue_draw (GTK_WIDGET (view));
+
+	return G_SOURCE_REMOVE;
+}
+
+static void
+update_content_shift (EvView          *view,
+		      gint             page,
+		      cairo_surface_t *surface)
+{
+	EvViewContentShift *cs;
+	gint old_shift, new_shift;
+	gint width;
+
+	if (!view->center_content || !view->content_shifts ||
+	    page < 0 || page >= view->n_content_shifts)
+		return;
+
+	cs = &view->content_shifts[page];
+	width = cairo_image_surface_get_width (surface);
+
+	/* Measure once, then again only when it gets twice as sharp */
+	if (cs->measured_width != 0 && !cs->stale && width < 2 * cs->measured_width)
+		return;
+
+	old_shift = _ev_view_get_content_shift (view, page);
+	if (!measure_content_shift (surface, cs))
+		return;
+
+	cs->measured_width = width;
+	cs->stale = FALSE;
+
+	new_shift = _ev_view_get_content_shift (view, page);
+	if (new_shift != old_shift && view->content_shift_idle_id == 0)
+		view->content_shift_idle_id =
+			g_idle_add ((GSourceFunc) content_shift_idle_cb, view);
+}
+
 static void
 draw_one_page (EvView       *view,
 	       gint          page,
@@ -7898,6 +8103,7 @@ draw_one_page (EvView       *view,
 		cairo_surface_t *page_surface = NULL;
 		cairo_surface_t *selection_surface = NULL;
 		gint offset_x, offset_y;
+		gint shift;
 		cairo_region_t *region = NULL;
 
 		page_surface = ev_pixbuf_cache_get_surface (view->pixbuf_cache, page);
@@ -7914,15 +8120,30 @@ draw_one_page (EvView       *view,
 		if (page == current_page)
 			ev_view_set_loading (view, FALSE);
 
+		update_content_shift (view, page, page_surface);
+		shift = _ev_view_get_content_shift (view, page);
+
+		cairo_save (cr);
+		if (shift != 0) {
+			EvViewContentShift *cs = &view->content_shifts[page];
+
+			gdk_cairo_rectangle (cr, &overlap);
+			cairo_clip (cr);
+			cairo_set_source_rgb (cr, cs->bg_red, cs->bg_green, cs->bg_blue);
+			cairo_paint (cr);
+		}
+
 		ev_view_get_page_size (view, page, &width, &height);
-		offset_x = overlap.x - real_page_area.x;
+		offset_x = overlap.x - (real_page_area.x + shift);
 		offset_y = overlap.y - real_page_area.y;
 
 		draw_surface (cr, page_surface, overlap.x, overlap.y, offset_x, offset_y, width, height);
 
 		/* Get the selection pixbuf iff we have something to draw */
-		if (!find_selection_for_page (view, page))
+		if (!find_selection_for_page (view, page)) {
+			cairo_restore (cr);
 			return;
+		}
 
 		selection_surface = ev_pixbuf_cache_get_selection_surface (view->pixbuf_cache,
 									   page,
@@ -7930,6 +8151,7 @@ draw_one_page (EvView       *view,
 		if (selection_surface) {
 			draw_surface (cr, selection_surface, overlap.x, overlap.y, offset_x, offset_y,
 				      width, height);
+			cairo_restore (cr);
 			return;
 		}
 
@@ -7952,9 +8174,10 @@ draw_one_page (EvView       *view,
 			scale_y *= device_scale_y;
 
 			_ev_view_get_selection_colors (view, &color, NULL);
-			draw_selection_region (cr, region, &color, real_page_area.x, real_page_area.y,
+			draw_selection_region (cr, region, &color, real_page_area.x + shift, real_page_area.y,
 					       scale_x, scale_y);
 		}
+		cairo_restore (cr);
 	}
 }
 
@@ -7969,6 +8192,7 @@ ev_view_finalize (GObject *object)
 	g_clear_object (&view->link_selected);
 
 	g_clear_pointer (&view->synctex_result, g_free);
+	g_clear_pointer (&view->content_shifts, g_free);
 
 	g_clear_object (&view->image_dnd_info.image);
 	g_clear_pointer (&view->annot_window_map, g_hash_table_destroy);
@@ -8000,6 +8224,8 @@ ev_view_dispose (GObject *object)
 		g_source_remove (view->update_cursor_idle_id);
 		view->update_cursor_idle_id = 0;
 	}
+
+	g_clear_handle_id (&view->content_shift_idle_id, g_source_remove);
 
 	if (view->selection_scroll_id) {
 	    g_source_remove (view->selection_scroll_id);
@@ -9170,6 +9396,34 @@ ev_view_autoscroll_stop (EvView *view)
 }
 
 static void
+ev_view_reset_content_shifts (EvView *view)
+{
+	g_clear_pointer (&view->content_shifts, g_free);
+	view->n_content_shifts = 0;
+
+	if (view->document && ev_document_get_n_pages (view->document) > 0) {
+		view->n_content_shifts = ev_document_get_n_pages (view->document);
+		view->content_shifts = g_new0 (EvViewContentShift, view->n_content_shifts);
+	}
+}
+
+/* Keeps the current shifts so nothing jumps, but measures them again */
+static void
+ev_view_invalidate_content_shifts (EvView *view)
+{
+	gint i;
+
+	if (!view->document ||
+	    ev_document_get_n_pages (view->document) != view->n_content_shifts) {
+		ev_view_reset_content_shifts (view);
+		return;
+	}
+
+	for (i = 0; i < view->n_content_shifts; i++)
+		view->content_shifts[i].stale = TRUE;
+}
+
+static void
 ev_view_document_changed_cb (EvDocumentModel *model,
 			     GParamSpec      *pspec,
 			     EvView          *view)
@@ -9190,6 +9444,7 @@ ev_view_document_changed_cb (EvDocumentModel *model,
 		view->selection_info.has_endpoints = FALSE;
 		view->find_page = -1;
 		view->find_result = 0;
+		ev_view_reset_content_shifts (view);
 
 		if (view->document) {
 			if (ev_document_get_n_pages (view->document) <= 0 ||
@@ -9222,6 +9477,7 @@ ev_view_rotation_changed_cb (EvDocumentModel *model,
 	gint rotation = ev_document_model_get_rotation (model);
 
 	view->rotation = rotation;
+	ev_view_reset_content_shifts (view);
 
 	if (view->pixbuf_cache) {
 		ev_pixbuf_cache_clear (view->pixbuf_cache);
@@ -9247,8 +9503,22 @@ ev_view_inverted_colors_changed_cb (EvDocumentModel *model,
 
 		inverted_colors = ev_document_model_get_inverted_colors (model);
 		ev_pixbuf_cache_set_inverted_colors (view->pixbuf_cache, inverted_colors);
+		/* The background color of the exposed band changes too */
+		ev_view_invalidate_content_shifts (view);
 		gtk_widget_queue_draw (GTK_WIDGET (view));
 	}
+}
+
+static void
+ev_view_center_content_changed_cb (EvDocumentModel *model,
+				   GParamSpec      *pspec,
+				   EvView          *view)
+{
+	view->center_content = ev_document_model_get_center_content (model);
+
+	/* Positioned children (form fields, annotation windows) move too */
+	gtk_widget_queue_allocate (GTK_WIDGET (view));
+	gtk_widget_queue_draw (GTK_WIDGET (view));
 }
 
 static void
@@ -9356,7 +9626,7 @@ ev_view_continuous_changed_cb (EvDocumentModel *model,
 		view_point.x = view->scroll_x;
 		view_point.y = view->scroll_y;
 		ev_view_get_page_extents (view, view->start_page, &page_area, &border);
-		_ev_view_transform_view_point_to_doc_point (view, &view_point,
+		_ev_view_transform_view_point_to_doc_point (view, view->start_page, &view_point,
 							    &page_area, &border,
 							    &view->pending_point.x,
 							    &view->pending_point.y);
@@ -9425,6 +9695,7 @@ ev_view_set_model (EvView          *view,
 	view->page_layout = ev_document_model_get_page_layout (view->model);
 	gtk_widget_set_direction (GTK_WIDGET(view), ev_document_model_get_rtl (view->model));
 	view->fullscreen = ev_document_model_get_fullscreen (view->model);
+	view->center_content = ev_document_model_get_center_content (view->model);
 	ev_view_document_changed_cb (view->model, NULL, view);
 
 	g_signal_connect (view->model, "notify::document",
@@ -9435,6 +9706,9 @@ ev_view_set_model (EvView          *view,
 			  view);
 	g_signal_connect (view->model, "notify::inverted-colors",
 			  G_CALLBACK (ev_view_inverted_colors_changed_cb),
+			  view);
+	g_signal_connect (view->model, "notify::center-content",
+			  G_CALLBACK (ev_view_center_content_changed_cb),
 			  view);
 	g_signal_connect (view->model, "notify::sizing-mode",
 			  G_CALLBACK (ev_view_sizing_mode_changed_cb),
@@ -9487,6 +9761,7 @@ ev_view_reload_page (EvView         *view,
 void
 ev_view_reload (EvView *view)
 {
+	ev_view_invalidate_content_shifts (view);
 	ev_pixbuf_cache_clear (view->pixbuf_cache);
 	view_update_range_and_current_page (view);
 }
@@ -10276,7 +10551,7 @@ compute_new_selection (EvView          *view,
 			point = stop;
 
 		if (i == first) {
-			_ev_view_transform_view_point_to_doc_point (view, point,
+			_ev_view_transform_view_point_to_doc_point (view, i, point,
 								    &page_area, &border,
 								    &selection->rect.x1,
 								    &selection->rect.y1);
@@ -10289,7 +10564,7 @@ compute_new_selection (EvView          *view,
 			point = stop;
 
 		if (i == last) {
-			_ev_view_transform_view_point_to_doc_point (view, point,
+			_ev_view_transform_view_point_to_doc_point (view, i, point,
 								    &page_area, &border,
 								    &selection->rect.x2,
 								    &selection->rect.y2);
@@ -10415,7 +10690,8 @@ merge_selection_region (EvView *view,
 				cairo_rectangle_int_t rect;
 
 				cairo_region_get_rectangle (region, i, &rect);
-				rect.x += page_area.x + border.left - view->scroll_x - 2;
+				rect.x += page_area.x + border.left - view->scroll_x - 2 +
+					_ev_view_get_content_shift (view, cur_page);
 				rect.y += page_area.y + border.top - view->scroll_y - 2;
 				rect.width += 4;
 				rect.height += 4;

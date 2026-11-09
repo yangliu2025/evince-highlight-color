@@ -109,6 +109,11 @@ void           ev_document_model_set_inverted_colors (EvDocumentModel *model,
 EV_PUBLIC
 gboolean       ev_document_model_get_inverted_colors (EvDocumentModel *model);
 EV_PUBLIC
+void           ev_document_model_set_center_content  (EvDocumentModel *model,
+						      gboolean         center_content);
+EV_PUBLIC
+gboolean       ev_document_model_get_center_content  (EvDocumentModel *model);
+EV_PUBLIC
 void             ev_document_model_set_continuous    (EvDocumentModel *model,
 						      gboolean         continuous);
 EV_PUBLIC
