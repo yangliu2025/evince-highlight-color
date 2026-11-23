@@ -18,6 +18,7 @@ if enable_user_doc
     'annotation-properties.page',
     'annotations-delete.page',
     'annotations-disabled.page',
+    'annotations-markdown.page',
     'annotations-navigate.page',
     'annotations.page',
     'annotations-save.page',

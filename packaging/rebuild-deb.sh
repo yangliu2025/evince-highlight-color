@@ -8,7 +8,9 @@
 # including any security patches Ubuntu carries over upstream.
 #
 # Requires: deb-src enabled, plus
-#   sudo apt install devscripts quilt fakeroot && sudo apt build-dep evince
+#   sudo apt install devscripts quilt fakeroot libmd4c-dev && sudo apt build-dep evince
+# (libmd4c-dev renders Markdown in annotation notes; the archive package does
+# not build-depend on it, so build-dep alone does not pull it in.)
 
 set -euo pipefail
 
@@ -17,13 +19,19 @@ set -euo pipefail
 BASE_REF="upstream/46.3.1"
 PATCH_NAME="highlight-annotation-colors.patch"
 PATCH_PATHS=(backend data help libdocument libmisc libview shell)
-NEW_SYMBOLS=(ev_document_model_get_center_content ev_document_model_set_center_content ev_view_add_annotation ev_view_clear_selection ev_view_get_selected_annotation ev_view_set_annotation_color)
+NEW_SYMBOLS=(ev_document_model_get_center_content ev_document_model_set_center_content ev_document_model_get_markdown_notes ev_document_model_set_markdown_notes ev_markdown_to_pango_markup ev_view_add_annotation ev_view_clear_selection ev_view_get_selected_annotation ev_view_set_annotation_color)
+# Extra Build-Depends the patched tree needs on top of the archive's.
+EXTRA_BUILD_DEPS=(libmd4c-dev)
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 WORKDIR="${1:-$PWD/evince-deb-build}"
 
 for tool in dpkg-buildpackage dch quilt; do
 	command -v "$tool" >/dev/null || { echo "missing: $tool" >&2; exit 1; }
+done
+for dep in "${EXTRA_BUILD_DEPS[@]}"; do
+	dpkg-query -W -f='${Status}' "$dep" 2>/dev/null | grep -q "install ok installed" ||
+		{ echo "missing build dependency: $dep (sudo apt install $dep)" >&2; exit 1; }
 done
 if [[ -z $(apt-cache showsrc evince 2>/dev/null) ]]; then
 	echo "no deb-src for evince; add a deb-src entry for noble main under" >&2
@@ -51,6 +59,11 @@ LOCAL_VERSION="${ARCHIVE_VERSION}+hl${suffix}"
 git -C "$REPO" diff "$BASE_REF" HEAD -- "${PATCH_PATHS[@]}" > "debian/patches/$PATCH_NAME"
 grep -qxF "$PATCH_NAME" debian/patches/series || echo "$PATCH_NAME" >> debian/patches/series
 
+for dep in "${EXTRA_BUILD_DEPS[@]}"; do
+	grep -qE "^Build-Depends:.*\b$dep\b" debian/control ||
+		sed -i "0,/^Build-Depends:/s//Build-Depends: $dep,/" debian/control
+done
+
 # dpkg-gensymbols only fails on *removed* symbols, but keep the file honest.
 symbols=debian/libevview3-3t64.symbols
 if [[ -f $symbols ]]; then
@@ -66,7 +79,7 @@ QUILT_PATCHES=debian/patches quilt pop -a
 DEBEMAIL="${DEBEMAIL:-$(git -C "$REPO" config user.email)}" \
 DEBFULLNAME="${DEBFULLNAME:-$(git -C "$REPO" config user.name)}" \
 	dch --newversion "$LOCAL_VERSION" --distribution "$(lsb_release -cs)" \
-	    "Local build: highlight colour picker, annotation editing and search tweaks, Center Content toggle."
+	    "Local build: highlight colour picker, annotation editing and search tweaks, Center Content toggle, Markdown notes."
 
 DEB_BUILD_OPTIONS="parallel=$(nproc)" dpkg-buildpackage -b -uc -us
 

@@ -203,6 +203,10 @@
         <attribute name="label" translatable="yes">Ce_nter Content</attribute>
         <attribute name="action">win.center-content</attribute>
       </item>
+      <item>
+        <attribute name="label" translatable="yes">_Markdown Notes</attribute>
+        <attribute name="action">win.markdown-notes</attribute>
+      </item>
     </section>
     <section>
       <item>

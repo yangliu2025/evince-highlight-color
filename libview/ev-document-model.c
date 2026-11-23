@@ -43,6 +43,7 @@ struct _EvDocumentModel
 	guint fullscreen : 1;
 	guint inverted_colors : 1;
 	guint center_content : 1;
+	guint markdown_notes : 1;
 
 	gdouble max_scale;
 	gdouble min_scale;
@@ -64,7 +65,8 @@ enum {
 	PROP_MIN_SCALE,
 	PROP_MAX_SCALE,
 	PROP_PAGE_LAYOUT,
-	PROP_CENTER_CONTENT
+	PROP_CENTER_CONTENT,
+	PROP_MARKDOWN_NOTES
 };
 
 enum
@@ -144,6 +146,9 @@ ev_document_model_set_property (GObject      *object,
 	case PROP_CENTER_CONTENT:
 		ev_document_model_set_center_content (model, g_value_get_boolean (value));
 		break;
+	case PROP_MARKDOWN_NOTES:
+		ev_document_model_set_markdown_notes (model, g_value_get_boolean (value));
+		break;
 	default:
 		G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
 	}
@@ -202,6 +207,9 @@ ev_document_model_get_property (GObject    *object,
 		break;
 	case PROP_CENTER_CONTENT:
 		g_value_set_boolean (value, model->center_content);
+		break;
+	case PROP_MARKDOWN_NOTES:
+		g_value_set_boolean (value, model->markdown_notes);
 		break;
 	default:
 		G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
@@ -263,6 +271,21 @@ ev_document_model_class_init (EvDocumentModelClass *klass)
 							       "Center Content",
 							       "Whether the content of each page is centered horizontally",
 							       FALSE,
+							       G_PARAM_READWRITE |
+                                                               G_PARAM_STATIC_STRINGS));
+	/**
+	 * EvDocumentModel:markdown-notes:
+	 *
+	 * Whether annotation notes are rendered as Markdown wherever they
+	 * are displayed read-only (tooltips, the annotations sidebar), or
+	 * shown as the plain text stored in the document.
+	 */
+	g_object_class_install_property (g_object_class,
+					 PROP_MARKDOWN_NOTES,
+					 g_param_spec_boolean ("markdown-notes",
+							       "Markdown Notes",
+							       "Whether annotation notes are rendered as Markdown",
+							       TRUE,
 							       G_PARAM_READWRITE |
                                                                G_PARAM_STATIC_STRINGS));
 	g_object_class_install_property (g_object_class,
@@ -368,6 +391,7 @@ ev_document_model_init (EvDocumentModel *model)
 	model->sizing_mode = EV_SIZING_FIT_WIDTH;
 	model->continuous = TRUE;
 	model->inverted_colors = FALSE;
+	model->markdown_notes = TRUE;
 	model->min_scale = DEFAULT_MIN_SCALE;
 	model->max_scale = DEFAULT_MAX_SCALE;
 }
@@ -707,6 +731,46 @@ ev_document_model_get_center_content (EvDocumentModel *model)
 	g_return_val_if_fail (EV_IS_DOCUMENT_MODEL (model), FALSE);
 
 	return model->center_content;
+}
+
+/**
+ * ev_document_model_set_markdown_notes:
+ * @model: a #EvDocumentModel
+ * @markdown_notes: whether to render annotation notes as Markdown
+ *
+ * Sets whether read-only displays of annotation notes (the hover tooltip
+ * and the annotations sidebar) render the note text as Markdown. When
+ * off they show the text exactly as stored in the document. Editing is
+ * unaffected: the note popup always edits the raw text.
+ */
+void
+ev_document_model_set_markdown_notes (EvDocumentModel *model,
+				      gboolean         markdown_notes)
+{
+	g_return_if_fail (EV_IS_DOCUMENT_MODEL (model));
+
+	markdown_notes = markdown_notes != FALSE;
+
+	if (markdown_notes == model->markdown_notes)
+		return;
+
+	model->markdown_notes = markdown_notes;
+
+	g_object_notify (G_OBJECT (model), "markdown-notes");
+}
+
+/**
+ * ev_document_model_get_markdown_notes:
+ * @model: a #EvDocumentModel
+ *
+ * Returns: whether annotation notes are rendered as Markdown
+ */
+gboolean
+ev_document_model_get_markdown_notes (EvDocumentModel *model)
+{
+	g_return_val_if_fail (EV_IS_DOCUMENT_MODEL (model), TRUE);
+
+	return model->markdown_notes;
 }
 
 void

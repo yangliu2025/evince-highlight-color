@@ -27,6 +27,7 @@
 #include "ev-sidebar-annotations.h"
 #include "ev-jobs.h"
 #include "ev-job-scheduler.h"
+#include "ev-markdown.h"
 #include "ev-stock-icons.h"
 #include "ev-window.h"
 #include "ev-utils.h"
@@ -51,6 +52,7 @@ enum {
 
 struct _EvSidebarAnnotationsPrivate {
 	EvDocument  *document;
+	EvDocumentModel *model;
 
 	GtkWidget    *swindow;
 	GtkWidget    *tree_view;
@@ -104,6 +106,11 @@ ev_sidebar_annotations_dispose (GObject *object)
 	if (priv->document) {
 		g_object_unref (priv->document);
 		priv->document = NULL;
+	}
+
+	if (priv->model) {
+		g_signal_handlers_disconnect_by_data (priv->model, sidebar_annots);
+		priv->model = NULL;
 	}
 
 	g_clear_object (&priv->popup_model);
@@ -399,10 +406,14 @@ job_finished_callback (EvJobAnnots          *job,
 			else
 				tooltip = g_strdup_printf ("<span weight=\"bold\">%s</span>", label);
 
-			if (contents && *contents != '\0')
-				markup = g_strdup_printf ("%s", contents);
-			else
+			if (contents && *contents != '\0') {
+				if (!priv->model || ev_document_model_get_markdown_notes (priv->model))
+					markup = ev_markdown_to_pango_markup (contents);
+				else
+					markup = g_markup_escape_text (contents, -1);
+			} else {
 				markup = g_strdup_printf ("<i>%s</i>", _("No Comment"));
+			}
 
 			if (EV_IS_ANNOTATION_TEXT (annot)) {
 				icon_name = EV_STOCK_ANNOT_TEXT;
@@ -543,13 +554,33 @@ ev_sidebar_annotations_popup_menu (GtkWidget *widget)
 						       &rect, annot_mapping, NULL);
 }
 
+static void
+ev_sidebar_annotations_markdown_notes_changed_cb (EvDocumentModel      *model,
+						  GParamSpec           *pspec,
+						  EvSidebarAnnotations *sidebar_annots)
+{
+	EvSidebarAnnotationsPrivate *priv = GET_PRIVATE (sidebar_annots);
+
+	if (priv->document)
+		ev_sidebar_annotations_load (sidebar_annots);
+}
+
 /* EvSidebarPageIface */
 static void
 ev_sidebar_annotations_set_model (EvSidebarPage   *sidebar_page,
 				  EvDocumentModel *model)
 {
+	EvSidebarAnnotationsPrivate *priv = GET_PRIVATE (EV_SIDEBAR_ANNOTATIONS (sidebar_page));
+
+	if (priv->model == model)
+		return;
+
+	priv->model = model;
 	g_signal_connect (model, "notify::document",
 			  G_CALLBACK (ev_sidebar_annotations_document_changed_cb),
+			  sidebar_page);
+	g_signal_connect (model, "notify::markdown-notes",
+			  G_CALLBACK (ev_sidebar_annotations_markdown_notes_changed_cb),
 			  sidebar_page);
 }
 

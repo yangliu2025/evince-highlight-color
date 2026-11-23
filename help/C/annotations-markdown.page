@@ -1,0 +1,45 @@
+<page xmlns="http://projectmallard.org/1.0/"
+      type="topic" style="task"
+      id="annotations-markdown">
+
+  <info>
+    <link type="guide" xref="index#annotations"/>
+
+    <desc>
+    Write notes with Markdown and read them formatted in the tooltip and the side pane.
+    </desc>
+
+    <revision pkgversion="46.3.1" date="2026-11-22" status="draft"/>
+    <license>
+      <p>Creative Commons Share Alike 3.0</p>
+    </license>
+
+  </info>
+
+<title>Format notes with Markdown</title>
+
+ <p>The text of an annotation can use Markdown. Headings, <em>emphasis</em>,
+ <em>strong</em> text, <code>inline code</code>, fenced code blocks,
+ strikethrough, bullet and numbered lists, task lists, block quotes, tables and
+ horizontal rules are recognised. Links are shown underlined but cannot be
+ clicked.</p>
+
+ <p>The note itself is always edited as plain text: double-click a highlight
+ to open its note and type the Markdown directly. The formatting is applied
+ wherever the note is only displayed, that is in the tooltip that appears when
+ you hover over the highlight and in the <gui>Annotations</gui> side pane.</p>
+
+ <p>To see the notes exactly as written instead, press <key>H</key> while the
+ document has the keyboard focus, or press the menu button in the top-right
+ corner of the window and switch off <gui style="menuitem">Markdown
+ Notes</gui>. A tooltip that is showing changes over immediately. Press
+ <key>H</key> again to go back to the formatted view. The setting lasts until
+ you close the window; every window starts with Markdown switched on.</p>
+
+<note style="tip">
+ <p>Plain notes look as they always did. Each line break is kept, four spaces
+ at the start of a line do not turn it into a code block, and <code>&lt;</code>
+ or <code>&amp;</code> are shown literally. Other PDF viewers show the note as
+ the text you typed, Markdown marks included.</p>
+</note>
+</page>

@@ -26,6 +26,7 @@ sources = files(
   'ev-jobs.c',
   'ev-job-scheduler.c',
   'ev-link-accessible.c',
+  'ev-markdown.c',
   'ev-page-accessible.c',
   'ev-page-cache.c',
   'ev-pixbuf-cache.c',
@@ -80,6 +81,12 @@ cflags = [
 if enable_multimedia
   sources += files('ev-media-player.c')
 endif
+
+# Markdown rendering of annotation notes (ev-markdown.c). Declared here, not
+# in the top-level meson.build, so that the packaging patch stays within
+# the directories it already covers.
+md4c_dep = dependency('md4c', version: '>= 0.4.0')
+deps += md4c_dep
 
 libevview = shared_library(
   'evview3',

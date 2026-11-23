@@ -308,6 +308,10 @@ struct _EvView {
 	EvViewContentShift *content_shifts;
 	gint                n_content_shifts;
 	guint               content_shift_idle_id;
+
+	/* Markdown rendering of annotation notes */
+	gboolean            markdown_notes;
+	guint               tooltip_requery_idle_id;
 };
 
 struct _EvViewClass {

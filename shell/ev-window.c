@@ -5304,6 +5304,19 @@ ev_window_cmd_view_center_content (GSimpleAction *action,
 }
 
 static void
+ev_window_cmd_view_markdown_notes (GSimpleAction *action,
+				   GVariant      *state,
+				   gpointer       user_data)
+{
+	EvWindow *ev_window = user_data;
+	EvWindowPrivate *priv = GET_PRIVATE (ev_window);
+
+	ev_document_model_set_markdown_notes (priv->model,
+					      g_variant_get_boolean (state));
+	g_simple_action_set_state (action, state);
+}
+
+static void
 ev_window_cmd_view_enable_spellchecking (GSimpleAction *action,
 				    GVariant      *state,
 				    gpointer       user_data)
@@ -5684,6 +5697,18 @@ ev_window_center_content_changed_cb (EvDocumentModel *model,
 	if (priv->metadata && !ev_window_is_empty (window))
 		ev_metadata_set_boolean (priv->metadata, "center-content",
 					 center_content);
+}
+
+static void
+ev_window_markdown_notes_changed_cb (EvDocumentModel *model,
+				     GParamSpec      *pspec,
+				     EvWindow        *window)
+{
+	GAction *action;
+
+	action = g_action_map_lookup_action (G_ACTION_MAP (window), "markdown-notes");
+	g_simple_action_set_state (G_SIMPLE_ACTION (action),
+				   g_variant_new_boolean (ev_document_model_get_markdown_notes (model)));
 }
 
 static void
@@ -6884,6 +6909,7 @@ static const GActionEntry actions[] = {
 	{ "show-side-pane", NULL, NULL, "false", ev_window_view_cmd_toggle_sidebar },
 	{ "inverted-colors", NULL, NULL, "false", ev_window_cmd_view_inverted_colors },
 	{ "center-content", NULL, NULL, "false", ev_window_cmd_view_center_content },
+	{ "markdown-notes", NULL, NULL, "true", ev_window_cmd_view_markdown_notes },
 	{ "enable-spellchecking", NULL, NULL, "false", ev_window_cmd_view_enable_spellchecking },
 	{ "fullscreen", NULL, NULL, "false", ev_window_cmd_view_fullscreen },
 	{ "presentation", ev_window_cmd_view_presentation },
@@ -8374,6 +8400,10 @@ ev_window_init (EvWindow *ev_window)
 	g_signal_connect (priv->model,
 			  "notify::center-content",
 			  G_CALLBACK (ev_window_center_content_changed_cb),
+			  ev_window);
+	g_signal_connect (priv->model,
+			  "notify::markdown-notes",
+			  G_CALLBACK (ev_window_markdown_notes_changed_cb),
 			  ev_window);
 
      	/* Connect sidebar signals */

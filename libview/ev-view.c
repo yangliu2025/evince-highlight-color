@@ -41,6 +41,7 @@
 #include "ev-view-marshal.h"
 #include "ev-document-annotations.h"
 #include "ev-annotation-window.h"
+#include "ev-markdown.h"
 #include "ev-view.h"
 #include "ev-view-accessible.h"
 #include "ev-view-private.h"
@@ -5638,7 +5639,14 @@ ev_view_query_tooltip (GtkWidget  *widget,
 			GdkRectangle annot_area;
 
 			get_annot_area (view, x, y, annot, &annot_area);
-			gtk_tooltip_set_text (tooltip, contents);
+			if (view->markdown_notes) {
+				gchar *markup = ev_markdown_to_pango_markup (contents);
+
+				gtk_tooltip_set_markup (tooltip, markup);
+				g_free (markup);
+			} else {
+				gtk_tooltip_set_text (tooltip, contents);
+			}
 			gtk_tooltip_set_tip_area (tooltip, &annot_area);
 
 			return TRUE;
@@ -8226,6 +8234,7 @@ ev_view_dispose (GObject *object)
 	}
 
 	g_clear_handle_id (&view->content_shift_idle_id, g_source_remove);
+	g_clear_handle_id (&view->tooltip_requery_idle_id, g_source_remove);
 
 	if (view->selection_scroll_id) {
 	    g_source_remove (view->selection_scroll_id);
@@ -8971,18 +8980,7 @@ ev_view_class_init (EvViewClass *class)
 	gtk_binding_entry_add_signal (binding_set, GDK_KEY_Return, GDK_SHIFT_MASK, "scroll", 2,
 				      GTK_TYPE_SCROLL_TYPE, GTK_SCROLL_PAGE_BACKWARD,
 				      GTK_TYPE_ORIENTATION, GTK_ORIENTATION_VERTICAL);
-        gtk_binding_entry_add_signal (binding_set, GDK_KEY_H, 0, "scroll", 2,
-				      GTK_TYPE_SCROLL_TYPE, GTK_SCROLL_STEP_BACKWARD,
-				      GTK_TYPE_ORIENTATION, GTK_ORIENTATION_HORIZONTAL);
-	gtk_binding_entry_add_signal (binding_set, GDK_KEY_J, 0, "scroll", 2,
-				      GTK_TYPE_SCROLL_TYPE, GTK_SCROLL_STEP_FORWARD,
-				      GTK_TYPE_ORIENTATION, GTK_ORIENTATION_VERTICAL);
-	gtk_binding_entry_add_signal (binding_set, GDK_KEY_K, 0, "scroll", 2,
-				      GTK_TYPE_SCROLL_TYPE, GTK_SCROLL_STEP_BACKWARD,
-				      GTK_TYPE_ORIENTATION, GTK_ORIENTATION_VERTICAL);
-	gtk_binding_entry_add_signal (binding_set, GDK_KEY_L, 0, "scroll", 2,
-				      GTK_TYPE_SCROLL_TYPE, GTK_SCROLL_STEP_FORWARD,
-				      GTK_TYPE_ORIENTATION, GTK_ORIENTATION_HORIZONTAL);
+	/* No vi-style h/j/k/l scrolling: "h" is the Markdown notes toggle. */
 	gtk_binding_entry_add_signal (binding_set, GDK_KEY_space, 0, "scroll", 2,
 				      GTK_TYPE_SCROLL_TYPE, GTK_SCROLL_PAGE_FORWARD,
 				      GTK_TYPE_ORIENTATION, GTK_ORIENTATION_VERTICAL);
@@ -9521,6 +9519,55 @@ ev_view_center_content_changed_cb (EvDocumentModel *model,
 	gtk_widget_queue_draw (GTK_WIDGET (view));
 }
 
+static gboolean
+ev_view_pointer_is_inside (EvView *view)
+{
+	GtkWidget *widget = GTK_WIDGET (view);
+	GdkWindow *window = gtk_widget_get_window (widget);
+	GdkDevice *pointer;
+	gint       x, y;
+
+	if (!window)
+		return FALSE;
+
+	pointer = gdk_seat_get_pointer (gdk_display_get_default_seat (gtk_widget_get_display (widget)));
+	if (!pointer)
+		return FALSE;
+
+	gdk_window_get_device_position (window, pointer, &x, &y, NULL);
+
+	return x >= 0 && y >= 0 &&
+	       x < gdk_window_get_width (window) && y < gdk_window_get_height (window);
+}
+
+static gboolean
+ev_view_tooltip_requery_idle (EvView *view)
+{
+	view->tooltip_requery_idle_id = 0;
+
+	/* GTK hides every tooltip on a key press, after the key was handled,
+	 * so this must run from an idle. The hide leaves the tooltip in browse
+	 * mode for 500 ms, so a note that was showing comes back in place
+	 * within 60 ms, rendered the other way.
+	 */
+	if (ev_view_pointer_is_inside (view))
+		gtk_tooltip_trigger_tooltip_query (gtk_widget_get_display (GTK_WIDGET (view)));
+
+	return G_SOURCE_REMOVE;
+}
+
+static void
+ev_view_markdown_notes_changed_cb (EvDocumentModel *model,
+				   GParamSpec      *pspec,
+				   EvView          *view)
+{
+	view->markdown_notes = ev_document_model_get_markdown_notes (model);
+
+	if (!view->tooltip_requery_idle_id)
+		view->tooltip_requery_idle_id =
+			g_idle_add ((GSourceFunc) ev_view_tooltip_requery_idle, view);
+}
+
 static void
 ev_view_sizing_mode_changed_cb (EvDocumentModel *model,
 				GParamSpec      *pspec,
@@ -9696,6 +9743,7 @@ ev_view_set_model (EvView          *view,
 	gtk_widget_set_direction (GTK_WIDGET(view), ev_document_model_get_rtl (view->model));
 	view->fullscreen = ev_document_model_get_fullscreen (view->model);
 	view->center_content = ev_document_model_get_center_content (view->model);
+	view->markdown_notes = ev_document_model_get_markdown_notes (view->model);
 	ev_view_document_changed_cb (view->model, NULL, view);
 
 	g_signal_connect (view->model, "notify::document",
@@ -9709,6 +9757,9 @@ ev_view_set_model (EvView          *view,
 			  view);
 	g_signal_connect (view->model, "notify::center-content",
 			  G_CALLBACK (ev_view_center_content_changed_cb),
+			  view);
+	g_signal_connect (view->model, "notify::markdown-notes",
+			  G_CALLBACK (ev_view_markdown_notes_changed_cb),
 			  view);
 	g_signal_connect (view->model, "notify::sizing-mode",
 			  G_CALLBACK (ev_view_sizing_mode_changed_cb),

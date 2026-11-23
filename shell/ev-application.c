@@ -855,6 +855,7 @@ ev_application_startup (GApplication *gapplication)
           "win.rotate-right",           "<Ctrl>Right", NULL,
           "win.inverted-colors",        "<Ctrl>I", NULL,
           "win.center-content",         "m", NULL,
+          "win.markdown-notes",         "h", NULL,
           "win.reload",                 "<Ctrl>R", NULL,
           "win.add-annotation",         "s", NULL,
           "win.highlight-annotation",   "<Ctrl>H", NULL,

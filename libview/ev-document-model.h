@@ -114,6 +114,11 @@ void           ev_document_model_set_center_content  (EvDocumentModel *model,
 EV_PUBLIC
 gboolean       ev_document_model_get_center_content  (EvDocumentModel *model);
 EV_PUBLIC
+void           ev_document_model_set_markdown_notes  (EvDocumentModel *model,
+						      gboolean         markdown_notes);
+EV_PUBLIC
+gboolean       ev_document_model_get_markdown_notes  (EvDocumentModel *model);
+EV_PUBLIC
 void             ev_document_model_set_continuous    (EvDocumentModel *model,
 						      gboolean         continuous);
 EV_PUBLIC
